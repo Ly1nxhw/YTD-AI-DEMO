@@ -3,6 +3,7 @@ import { Send, Loader2, Copy, CheckCircle, AlertTriangle, Pencil, RotateCcw, Sav
 import { useGenerationStore } from '@/stores/generation-store'
 import { useKnowledgeStore } from '@/stores/knowledge-store'
 import { SUPPORTED_LANGUAGES } from '@/types'
+import VariableFillPanel from './VariableFillPanel'
 
 interface MainPanelProps {
   isCompact?: boolean
@@ -287,6 +288,17 @@ export default function MainPanel({ isCompact = false }: MainPanelProps) {
                     </p>
                   </div>
                 </div>
+              </div>
+            )}
+
+            {/* Variable fill panel — only appears when {{变量}} detected */}
+            {step2Result && (
+              <div className={`${isCompact ? 'mt-2' : 'mt-3'}`}>
+                <VariableFillPanel
+                  replyText={editedReply || step2Result.reply}
+                  onFill={(filledText) => setEditedReply(filledText)}
+                  isCompact={isCompact}
+                />
               </div>
             )}
 
