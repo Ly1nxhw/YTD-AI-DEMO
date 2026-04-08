@@ -32,6 +32,7 @@ export default function MainPanel({ isCompact = false }: MainPanelProps) {
 
   const [isEditing, setIsEditing] = useState(false)
   const [copied, setCopied] = useState(false)
+  const [editedChinese, setEditedChinese] = useState('')
   const [matchCopyFeedback, setMatchCopyFeedback] = useState<number | null>(null)
   const [showSaveForm, setShowSaveForm] = useState(false)
   const [saveTitle, setSaveTitle] = useState('')
@@ -40,9 +41,8 @@ export default function MainPanel({ isCompact = false }: MainPanelProps) {
   const isProcessing = status === 'step1' || status === 'matching' || status === 'step2'
 
   const detectedLang = step1Result?.detected_language
-  const langInfo = SUPPORTED_LANGUAGES.find(
-    l => l.code === (selectedLanguage === 'auto' ? detectedLang : selectedLanguage)
-  )
+  const targetLangCode = selectedLanguage === 'auto' ? (detectedLang || 'en') : selectedLanguage
+  const langInfo = SUPPORTED_LANGUAGES.find(l => l.code === targetLangCode)
 
   const handleGenerate = () => {
     setCopied(false)
@@ -281,7 +281,7 @@ export default function MainPanel({ isCompact = false }: MainPanelProps) {
                   </div>
                   <div className="p-3">
                     <p className="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed">
-                      {step2Result?.chinese || ''}
+                      {editedChinese || step2Result?.chinese || ''}
                       {status === 'step2' && !step2Result?.chinese && (
                         <span className="text-gray-400 text-xs">生成中...</span>
                       )}
@@ -296,7 +296,9 @@ export default function MainPanel({ isCompact = false }: MainPanelProps) {
               <div className={`${isCompact ? 'mt-2' : 'mt-3'}`}>
                 <VariableFillPanel
                   replyText={editedReply || step2Result.reply}
-                  onFill={(filledText) => setEditedReply(filledText)}
+                  chineseText={editedChinese || step2Result.chinese}
+                  targetLang={targetLangCode}
+                  onFill={(filledReply, filledChinese) => { setEditedReply(filledReply); setEditedChinese(filledChinese) }}
                   isCompact={isCompact}
                 />
               </div>
