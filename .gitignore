@@ -1,5 +1,22 @@
+# 依赖
 node_modules/
+
+# 构建产物
 dist/
 dist-electron/
-.vite/
+build/
+out/
+
+# 环境变量
+.env
+.env.local
+.env.*.local
+
+# 系统文件
+.DS_Store
 *.log
+
+# 编辑器
+.idea/
+.vscode/
+*.swp

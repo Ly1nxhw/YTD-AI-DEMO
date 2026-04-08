@@ -6,13 +6,18 @@ let mainWindow: BrowserWindow | null = null
 
 const VITE_DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL
 
+let isCompactMode = false
+let savedBounds: Electron.Rectangle | null = null
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 800,
-    minWidth: 960,
-    minHeight: 600,
+    minWidth: 480,
+    minHeight: 320,
     title: 'AI 客服助手',
+    transparent: false,
+    frame: true,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -138,4 +143,41 @@ ipcMain.handle('copy-to-clipboard', async (_event, text: string) => {
 // Get app path
 ipcMain.handle('get-app-path', () => {
   return app.getAppPath()
+})
+
+// Window opacity control
+ipcMain.handle('set-opacity', (_event, opacity: number) => {
+  if (!mainWindow) return
+  mainWindow.setOpacity(Math.max(0.3, Math.min(1.0, opacity)))
+})
+
+ipcMain.handle('get-opacity', () => {
+  return mainWindow?.getOpacity() ?? 1.0
+})
+
+// Compact mode toggle
+ipcMain.handle('toggle-compact-mode', () => {
+  if (!mainWindow) return false
+  if (isCompactMode) {
+    // Restore to full size
+    if (savedBounds) {
+      mainWindow.setBounds(savedBounds)
+    } else {
+      mainWindow.setSize(1280, 800)
+    }
+    mainWindow.setMinimumSize(480, 320)
+    isCompactMode = false
+  } else {
+    // Save current bounds and switch to compact
+    savedBounds = mainWindow.getBounds()
+    mainWindow.setMinimumSize(380, 300)
+    mainWindow.setSize(420, 600)
+    mainWindow.setAlwaysOnTop(true)
+    isCompactMode = true
+  }
+  return isCompactMode
+})
+
+ipcMain.handle('get-compact-mode', () => {
+  return isCompactMode
 })

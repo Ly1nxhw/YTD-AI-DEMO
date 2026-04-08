@@ -9,5 +9,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   writeSettings: (data: string) => ipcRenderer.invoke('write-settings', data),
   readMarkdownFile: (filePath: string) => ipcRenderer.invoke('read-markdown-file', filePath),
   copyToClipboard: (text: string) => ipcRenderer.invoke('copy-to-clipboard', text),
-  getAppPath: () => ipcRenderer.invoke('get-app-path')
+  getAppPath: () => ipcRenderer.invoke('get-app-path'),
+  setOpacity: (opacity: number) => ipcRenderer.invoke('set-opacity', opacity),
+  getOpacity: () => ipcRenderer.invoke('get-opacity'),
+  toggleCompactMode: () => ipcRenderer.invoke('toggle-compact-mode'),
+  getCompactMode: () => ipcRenderer.invoke('get-compact-mode'),
 })

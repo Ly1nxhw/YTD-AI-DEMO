@@ -10,6 +10,10 @@ interface ElectronAPI {
   readMarkdownFile: (filePath: string) => Promise<string | null>
   copyToClipboard: (text: string) => Promise<boolean>
   getAppPath: () => Promise<string>
+  setOpacity: (opacity: number) => Promise<void>
+  getOpacity: () => Promise<number>
+  toggleCompactMode: () => Promise<boolean>
+  getCompactMode: () => Promise<boolean>
 }
 
 declare global {
