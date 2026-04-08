@@ -42,10 +42,14 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
       const data = await window.electronAPI.readSettings()
       if (data) {
         const merged = { ...DEFAULT_SETTINGS, ...data }
-        // Auto-upgrade: if saved promptA is from the old TF-IDF era (no {script_catalog}), replace with new default
+        // Auto-upgrade: always sync prompts with latest defaults when code changes
         let needsSave = false
-        if (merged.promptA && !merged.promptA.includes('{script_catalog}')) {
+        if (merged.promptA !== DEFAULT_PROMPT_A) {
           merged.promptA = DEFAULT_PROMPT_A
+          needsSave = true
+        }
+        if (merged.promptB !== DEFAULT_PROMPT_B) {
+          merged.promptB = DEFAULT_PROMPT_B
           needsSave = true
         }
         set({ settings: merged })

@@ -1,41 +1,39 @@
 import { useState, useEffect } from 'react'
-import { FileText, Check } from 'lucide-react'
+import { FileText, Check, Calendar } from 'lucide-react'
 import type { TemplateVariable } from '@/lib/variables'
-import { extractVariables, fillVariables } from '@/lib/variables'
+import { extractVariables, fillBothTexts, formatDate, formatDateChinese } from '@/lib/variables'
 
 interface VariableFillPanelProps {
-  /** The reply text that may contain {{变量}} */
   replyText: string
-  /** Callback when user confirms variable replacement */
-  onFill: (filledText: string) => void
-  /** Whether in compact mode */
+  chineseText: string
+  targetLang: string
+  onFill: (filledReply: string, filledChinese: string) => void
   isCompact?: boolean
 }
 
-export default function VariableFillPanel({ replyText, onFill, isCompact = false }: VariableFillPanelProps) {
+export default function VariableFillPanel({ replyText, chineseText, targetLang, onFill, isCompact = false }: VariableFillPanelProps) {
   const [variables, setVariables] = useState<TemplateVariable[]>([])
   const [filled, setFilled] = useState(false)
 
   useEffect(() => {
-    const vars = extractVariables(replyText)
+    const vars = extractVariables(replyText, chineseText)
     setVariables(vars)
     setFilled(false)
-  }, [replyText])
+  }, [replyText, chineseText])
 
-  // Don't render anything if no variables detected
   if (variables.length === 0) return null
 
-  const updateValue = (index: number, value: string) => {
-    setVariables(prev => prev.map((v, i) => i === index ? { ...v, value } : v))
+  const updateInput = (index: number, val: string) => {
+    setVariables(prev => prev.map((v, i) => i === index ? { ...v, inputValue: val } : v))
   }
 
   const handleFill = () => {
-    const result = fillVariables(replyText, variables)
-    onFill(result)
+    const { filledReply, filledChinese } = fillBothTexts(replyText, chineseText, variables, targetLang)
+    onFill(filledReply, filledChinese)
     setFilled(true)
   }
 
-  const allFilled = variables.every(v => v.value.trim() !== '')
+  const allFilled = variables.every(v => v.inputValue.trim() !== '')
 
   return (
     <div className={`border rounded-lg overflow-hidden ${filled ? 'border-green-200 bg-green-50' : 'border-amber-200 bg-amber-50'}`}>
@@ -47,19 +45,39 @@ export default function VariableFillPanel({ replyText, onFill, isCompact = false
       </div>
 
       {!filled && (
-        <div className={`${isCompact ? 'p-2 space-y-1.5' : 'p-3 space-y-2'}`}>
+        <div className={`${isCompact ? 'p-2 space-y-2' : 'p-3 space-y-2.5'}`}>
           {variables.map((v, idx) => (
-            <div key={v.raw} className="flex items-center gap-2">
-              <code className={`shrink-0 px-1.5 py-0.5 bg-white border border-amber-300 rounded font-mono ${isCompact ? 'text-[10px]' : 'text-xs'} text-amber-700`}>
-                {v.raw}
-              </code>
-              <input
-                type="text"
-                value={v.value}
-                onChange={e => updateValue(idx, e.target.value)}
-                placeholder={`输入${v.name}...`}
-                className={`flex-1 px-2 py-1 border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-amber-400 focus:border-amber-400 ${isCompact ? 'text-[10px]' : 'text-xs'}`}
-              />
+            <div key={`${v.raw}-${idx}`}>
+              <div className="flex items-center gap-2">
+                <code className={`shrink-0 px-1.5 py-0.5 bg-white border border-amber-300 rounded font-mono ${isCompact ? 'text-[10px]' : 'text-xs'} text-amber-700`}>
+                  {v.nameChinese}
+                </code>
+                {v.type === 'date' ? (
+                  <div className="flex-1 flex items-center gap-1.5">
+                    <Calendar className={`shrink-0 text-amber-500 ${isCompact ? 'w-3 h-3' : 'w-3.5 h-3.5'}`} />
+                    <input
+                      type="date"
+                      value={v.inputValue}
+                      onChange={e => updateInput(idx, e.target.value)}
+                      className={`flex-1 px-2 py-1 border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-amber-400 focus:border-amber-400 ${isCompact ? 'text-[10px]' : 'text-xs'}`}
+                    />
+                  </div>
+                ) : (
+                  <input
+                    type="text"
+                    value={v.inputValue}
+                    onChange={e => updateInput(idx, e.target.value)}
+                    placeholder={`输入${v.nameChinese}...`}
+                    className={`flex-1 px-2 py-1 border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-amber-400 focus:border-amber-400 ${isCompact ? 'text-[10px]' : 'text-xs'}`}
+                  />
+                )}
+              </div>
+              {v.type === 'date' && v.inputValue && (
+                <div className={`mt-1 flex gap-3 ${isCompact ? 'text-[9px] ml-6' : 'text-[10px] ml-8'} text-gray-500`}>
+                  <span>🌐 {formatDate(v.inputValue, targetLang)}</span>
+                  <span>🇨🇳 {formatDateChinese(v.inputValue)}</span>
+                </div>
+              )}
             </div>
           ))}
           <button
