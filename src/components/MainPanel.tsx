@@ -280,7 +280,7 @@ export default function MainPanel({ isCompact = false }: MainPanelProps) {
                     <span className="text-[11px] font-medium text-gray-600">中文对照</span>
                   </div>
                   <div className="p-3">
-                    <p className="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed select-text cursor-text">
+                    <p className="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed">
                       {editedChinese || step2Result?.chinese || ''}
                       {status === 'step2' && !step2Result?.chinese && (
                         <span className="text-gray-400 text-xs">生成中...</span>

@@ -72,6 +72,7 @@ export default function VariableFillPanel({ replyText, chineseText, targetLang, 
                   />
                 )}
               </div>
+              {/* Date preview */}
               {v.type === 'date' && v.inputValue && (
                 <div className={`mt-1 flex gap-3 ${isCompact ? 'text-[9px] ml-6' : 'text-[10px] ml-8'} text-gray-500`}>
                   <span>🌐 {formatDate(v.inputValue, targetLang)}</span>
