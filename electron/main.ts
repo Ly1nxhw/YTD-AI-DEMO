@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, shell, clipboard, globalShortcut } from 'electron'
+import { app, BrowserWindow, ipcMain, shell, clipboard, globalShortcut, Menu } from 'electron'
 import path from 'path'
 import fs from 'fs'
 
@@ -40,7 +40,10 @@ function createWindow() {
   })
 }
 
-app.whenReady().then(createWindow)
+app.whenReady().then(() => {
+  Menu.setApplicationMenu(null)
+  createWindow()
+})
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()

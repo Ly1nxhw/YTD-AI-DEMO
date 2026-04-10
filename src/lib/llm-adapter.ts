@@ -494,6 +494,76 @@ export async function testConnection(provider: LLMProvider): Promise<{ ok: boole
   }
 }
 
+// ===== Extract Scripts from Chat History =====
+
+export interface ExtractedScript {
+  title: string
+  category: string
+  keywords: string[]
+  content: string       // 话术模板（中文）
+  scenario: string      // 场景描述
+  customerExample: string  // 原始客户消息示例
+}
+
+export async function extractScriptsFromChat(
+  provider: LLMProvider,
+  chatHistory: string,
+  model?: string
+): Promise<ExtractedScript[]> {
+  const systemPrompt = `你是一位资深电商客服话术分析师。你的任务是从客服聊天记录中提取可复用的话术模板。
+
+分析步骤：
+1. 识别聊天记录中的客户问题和客服回复对
+2. 提取客服回复中可复用的部分，归纳为标准化话术模板
+3. 将具体信息（订单号、日期、金额、姓名等）替换为 {{变量}} 占位符
+4. 为每条话术自动分类并提取关键词
+
+输出严格 JSON 数组，每个元素：
+{
+  "title": "话术标题（简洁概括场景）",
+  "category": "分类（如：退款类、物流类、产品问题类、售后类、配件类、问候类、其他类）",
+  "keywords": ["关键词1", "关键词2", "关键词3"],
+  "content": "话术模板正文（中文，具体信息用 {{变量名}} 代替）",
+  "scenario": "使用场景描述",
+  "customerExample": "客户原始消息摘要"
+}
+
+规则：
+- 输出 JSON 数组，不要有其他文字
+- 如果原始回复是外语，翻译为中文话术模板
+- 合并相似的回复为一条话术
+- 每条话术应该独立完整可用
+- content 中将订单号替换为 {{订单号}}，日期替换为 {{日期}}，金额替换为 {{金额}} 等
+- 如果聊天记录过短或无法提取有效话术，返回空数组 []`
+
+  const result = await callOpenAICompatible(
+    provider,
+    systemPrompt,
+    `以下是客服聊天记录，请分析提取话术模板：\n\n${chatHistory}`,
+    model,
+    false,
+    undefined,
+    4000
+  )
+
+  // Robust JSON extraction
+  let jsonStr = result.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
+  const firstBracket = jsonStr.indexOf('[')
+  const lastBracket = jsonStr.lastIndexOf(']')
+  if (firstBracket !== -1 && lastBracket > firstBracket) {
+    jsonStr = jsonStr.slice(firstBracket, lastBracket + 1)
+  }
+
+  try {
+    const parsed = JSON.parse(jsonStr)
+    if (!Array.isArray(parsed)) return []
+    return parsed as ExtractedScript[]
+  } catch {
+    console.error('[extractScripts] JSON parse failed:', jsonStr.slice(0, 300))
+    return []
+  }
+}
+
 // ===== Quick Translate (Chinese → Target Language) =====
 
 export async function translateToTarget(

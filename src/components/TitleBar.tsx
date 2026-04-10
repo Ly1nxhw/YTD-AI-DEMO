@@ -1,16 +1,15 @@
 import { useState, useEffect, useRef } from 'react'
-import { Pin, PinOff, Settings, Bot, Minimize2, Maximize2, Eye, BarChart3 } from 'lucide-react'
+import { Pin, PinOff, Settings, Bot, Minimize2, Maximize2, Eye } from 'lucide-react'
 import { useGenerationStore } from '@/stores/generation-store'
 import { SUPPORTED_LANGUAGES } from '@/types'
 
 interface TitleBarProps {
   onOpenSettings: () => void
-  onOpenStats: () => void
   isCompact: boolean
   onCompactChange: (compact: boolean) => void
 }
 
-export default function TitleBar({ onOpenSettings, onOpenStats, isCompact, onCompactChange }: TitleBarProps) {
+export default function TitleBar({ onOpenSettings, isCompact, onCompactChange }: TitleBarProps) {
   const [isOnTop, setIsOnTop] = useState(false)
   const [opacity, setOpacity] = useState(1.0)
   const [showOpacitySlider, setShowOpacitySlider] = useState(false)
@@ -127,17 +126,6 @@ export default function TitleBar({ onOpenSettings, onOpenStats, isCompact, onCom
             : <PinOff className={`${isCompact ? 'w-3.5 h-3.5' : 'w-4 h-4'}`} />
           }
         </button>
-
-        {/* Stats button (hidden in compact) */}
-        {!isCompact && (
-          <button
-            onClick={onOpenStats}
-            className="p-1 rounded-md text-gray-500 hover:bg-gray-100 transition-colors"
-            title="使用统计"
-          >
-            <BarChart3 className="w-4 h-4" />
-          </button>
-        )}
 
         {/* Settings button (hidden in compact) */}
         {!isCompact && (

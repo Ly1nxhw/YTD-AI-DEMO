@@ -8,10 +8,12 @@ import SettingsPanel from '@/components/SettingsPanel'
 import StatusBar from '@/components/StatusBar'
 import TitleBar from '@/components/TitleBar'
 import StatsPanel from '@/components/StatsPanel'
+import ConversationLearner from '@/components/ConversationLearner'
 
 export default function App() {
   const [showSettings, setShowSettings] = useState(false)
   const [showStats, setShowStats] = useState(false)
+  const [showLearner, setShowLearner] = useState(false)
   const [isCompact, setIsCompact] = useState(false)
   const loadKnowledgeBase = useKnowledgeStore(s => s.loadKnowledgeBase)
   const loadSettings = useSettingsStore(s => s.loadSettings)
@@ -38,18 +40,26 @@ export default function App() {
   return (
     <div className="flex flex-col h-screen bg-gray-50 select-none">
       <TitleBar
-        onOpenSettings={() => { setShowSettings(true); setShowStats(false) }}
-        onOpenStats={() => { setShowStats(true); setShowSettings(false) }}
+        onOpenSettings={() => { setShowSettings(true); setShowStats(false); setShowLearner(false) }}
         isCompact={isCompact}
         onCompactChange={setIsCompact}
       />
 
       <div className="flex flex-1 overflow-hidden">
-        {!isCompact && <Sidebar />}
+        {!isCompact && (
+          <Sidebar
+            onOpenKB={() => { setShowStats(false); setShowSettings(false); setShowLearner(false) }}
+            onOpenStats={() => { setShowStats(true); setShowSettings(false); setShowLearner(false) }}
+            onOpenLearner={() => { setShowLearner(true); setShowSettings(false); setShowStats(false) }}
+            activePanel={showStats ? 'stats' : showLearner ? 'learner' : undefined}
+          />
+        )}
         {showSettings && !isCompact ? (
           <SettingsPanel onClose={() => setShowSettings(false)} />
         ) : showStats && !isCompact ? (
           <StatsPanel onClose={() => setShowStats(false)} />
+        ) : showLearner && !isCompact ? (
+          <ConversationLearner onClose={() => setShowLearner(false)} />
         ) : (
           <MainPanel isCompact={isCompact} />
         )}
