@@ -40,15 +40,28 @@
     "appId": "com.ai-cs-assistant",
     "productName": "AI客服助手",
     "win": {
-      "target": "nsis"
+      "target": [
+        "nsis",
+        "portable"
+      ]
     },
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true
     },
+    "portable": {
+      "artifactName": "AI客服助手-portable.exe"
+    },
     "files": [
       "dist/**/*",
-      "dist-electron/**/*"
+      "dist-electron/**/*",
+      "客服回复.md"
+    ],
+    "extraResources": [
+      {
+        "from": "客服回复.md",
+        "to": "客服回复.md"
+      }
     ]
   }
 }

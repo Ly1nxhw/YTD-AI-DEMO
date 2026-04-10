@@ -50,20 +50,42 @@ export interface Step2Result {
   unmatched: boolean
 }
 
+export interface TriageInfo {
+  decision: 'AUTO' | 'HUMAN'
+  complexity: number
+  sentiment: 'positive' | 'neutral' | 'negative' | 'angry'
+  risk_level: 'low' | 'medium' | 'high'
+  reason: string
+}
+
+export interface QualityCheckInfo {
+  pass: boolean
+  checks: Record<string, boolean>
+  failReasons: string[]
+}
+
+export type PipelineDecision = 'AUTO' | 'HUMAN' | 'QUALITY_FAIL'
+
 export interface GenerationState {
-  status: 'idle' | 'step1' | 'matching' | 'step2' | 'done' | 'error'
+  status: 'idle' | 'triage' | 'matching' | 'step2' | 'done' | 'error'
   step1Result: Step1Result | null
   matchedEntries: MatchedEntry[]
   step2Result: Step2Result | null
   streamingReply: string
   streamingChinese: string
   error: string | null
+  triageInfo: TriageInfo | null
+  qualityCheck: QualityCheckInfo | null
+  pipelineDecision: PipelineDecision | null
+  suggestedStrategy: string | null
 }
 
 // ===== Settings Types =====
 
 export interface AppSettings {
   llmProvider: LLMProvider
+  llmProviders: LLMProvider[]       // all configured providers
+  activeProviderId: string           // currently active provider id
   step1Model: string
   step2Model: string
   defaultLanguage: string

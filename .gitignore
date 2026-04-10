@@ -20,3 +20,17 @@ out/
 .idea/
 .vscode/
 *.swp
+
+# 编译/打包产物
+*.exe
+*.dll
+*.asar
+dist/
+build/
+output/
+releases/
+
+AI-客服/
+node_modules/
+dist/
+out/

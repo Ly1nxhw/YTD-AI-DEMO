@@ -1,9 +1,11 @@
 import { create } from 'zustand'
-import type { GenerationState, Step1Result, MatchedEntry, Step2Result } from '@/types'
-import { runStep1, runStep2, buildScriptCatalog } from '@/lib/llm-adapter'
+import type { GenerationState, MatchedEntry, Step2Result } from '@/types'
 import { useKnowledgeStore } from './knowledge-store'
 import { useSettingsStore } from './settings-store'
 import { SUPPORTED_LANGUAGES } from '@/types'
+import { runPipeline } from '@/agent/pipeline'
+import { recordGap } from '@/agent/gap-tracker'
+import { recordSession, markLastSessionEdited } from '@/agent/stats-tracker'
 
 interface GenerationStore extends GenerationState {
   customerMessage: string
@@ -28,6 +30,10 @@ const initialState: GenerationState = {
   streamingReply: '',
   streamingChinese: '',
   error: null,
+  triageInfo: null,
+  qualityCheck: null,
+  pipelineDecision: null,
+  suggestedStrategy: null,
 }
 
 export const useGenerationStore = create<GenerationStore>((set, get) => ({
@@ -46,7 +52,7 @@ export const useGenerationStore = create<GenerationStore>((set, get) => ({
     if (!customerMessage.trim()) return
 
     const settings = useSettingsStore.getState().settings
-    const { llmProvider, promptA, promptB, step1Model, step2Model } = settings
+    const { llmProvider, promptB, step1Model, step2Model } = settings
 
     if (!llmProvider.apiKey && !llmProvider.apiUrl.includes('localhost')) {
       set({ status: 'error', error: '请先在设置中配置 API Key' })
@@ -55,73 +61,93 @@ export const useGenerationStore = create<GenerationStore>((set, get) => ({
 
     set({
       ...initialState,
-      status: 'step1',
+      status: 'triage',
       customerMessage: get().customerMessage,
       selectedLanguage: get().selectedLanguage,
     })
 
     try {
-      // Build script catalog from knowledge base for LLM matching
       const activeEntries = useKnowledgeStore.getState().getActiveEntries()
-      const scriptCatalog = buildScriptCatalog(activeEntries)
 
-      // Step 1: Understanding + LLM-based script matching
-      const step1Result: Step1Result = await runStep1(
+      // Determine target language name for Step 2
+      const langInfo = SUPPORTED_LANGUAGES.find(l => l.code === selectedLanguage)
+      const targetLanguageName = selectedLanguage === 'auto' ? 'auto' : (langInfo?.name || selectedLanguage)
+
+      const pipelineResult = await runPipeline(
         llmProvider,
         customerMessage,
-        scriptCatalog,
-        promptA,
-        step1Model || undefined
-      )
-
-      set({ step1Result, status: 'matching' })
-
-      // Resolve matched_ids to actual entries
-      const matchedEntries: MatchedEntry[] = (step1Result.matched_ids || [])
-        .map(id => {
-          const entry = activeEntries.find(e => e.id === id)
-          return entry ? { entry, score: 1.0 } : null
-        })
-        .filter((m): m is MatchedEntry => m !== null)
-
-      set({ matchedEntries, status: 'step2' })
-
-      // Determine target language
-      let targetLang = selectedLanguage
-      if (targetLang === 'auto') {
-        targetLang = step1Result.detected_language
-      }
-      const langInfo = SUPPORTED_LANGUAGES.find(l => l.code === targetLang)
-      const targetLanguageName = langInfo ? langInfo.name : targetLang
-
-      // Step 2: Generation (with streaming)
-      const step2Result: Step2Result = await runStep2(
-        llmProvider,
-        customerMessage,
-        step1Result.chinese_translation,
-        step1Result.intent,
-        matchedEntries,
+        activeEntries,
         targetLanguageName,
-        promptB,
-        step2Model || undefined,
         {
-          onToken: (token) => {
+          onTriageComplete: (triage) => {
+            set({
+              step1Result: {
+                chinese_translation: triage.chinese_translation,
+                detected_language: triage.detected_language,
+                intent: triage.intent,
+                keywords: triage.keywords,
+                matched_ids: triage.matched_ids,
+              },
+              triageInfo: triage.triage,
+              suggestedStrategy: triage.suggested_strategy || null,
+              status: 'matching',
+            })
+          },
+          onMatchComplete: (entries) => {
+            set({ matchedEntries: entries, status: 'step2' })
+          },
+          onGenerationToken: (token) => {
             set(state => ({
               streamingReply: state.streamingReply + token,
             }))
           },
-          onComplete: () => {
-            // Handled below
+          onGenerationComplete: (result) => {
+            // handled below
           },
-          onError: (error) => {
-            set({ status: 'error', error })
+          onQualityCheck: (qc) => {
+            set({
+              qualityCheck: {
+                pass: qc.pass,
+                checks: qc.checks,
+                failReasons: qc.failReasons,
+              },
+            })
           },
+          onDecision: (decision) => {
+            set({ pipelineDecision: decision })
+          },
+        },
+        {
+          step1Model: step1Model || undefined,
+          step2Model: step2Model || undefined,
+          promptB,
         }
       )
 
+      // Track unmatched scenarios for gap analysis
+      const s1 = get().step1Result
+      if (pipelineResult.step2Result?.unmatched) {
+        recordGap(
+          s1?.intent || 'unknown',
+          s1?.detected_language || '??',
+          get().customerMessage
+        )
+      }
+
+      // Record session stats
+      recordSession({
+        intent: s1?.intent || 'unknown',
+        language: s1?.detected_language || '??',
+        decision: get().triageInfo?.decision === 'AUTO' ? 'AUTO' : 'HUMAN',
+        matched: !pipelineResult.step2Result?.unmatched,
+        edited: false,
+        savedAsScript: false,
+      })
+
       set({
-        step2Result,
-        editedReply: step2Result.reply,
+        step2Result: pipelineResult.step2Result,
+        editedReply: pipelineResult.step2Result?.reply || '',
+        suggestedStrategy: pipelineResult.suggestedStrategy,
         isDraft: true,
         status: 'done',
       })
@@ -147,6 +173,10 @@ export const useGenerationStore = create<GenerationStore>((set, get) => ({
     const textToCopy = editedReply || step2Result?.reply || ''
     if (textToCopy) {
       await window.electronAPI.copyToClipboard(textToCopy)
+      // Track if user edited the reply
+      if (editedReply && step2Result?.reply && editedReply !== step2Result.reply) {
+        markLastSessionEdited()
+      }
       set({ isDraft: false })
     }
   },

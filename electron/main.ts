@@ -1,8 +1,11 @@
-import { app, BrowserWindow, ipcMain, shell } from 'electron'
+import { app, BrowserWindow, ipcMain, shell, clipboard, globalShortcut } from 'electron'
 import path from 'path'
 import fs from 'fs'
 
 let mainWindow: BrowserWindow | null = null
+let clipboardWatchInterval: ReturnType<typeof setInterval> | null = null
+let lastClipboardText = ''
+let clipboardWatchEnabled = false
 
 const VITE_DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL
 
@@ -121,11 +124,17 @@ ipcMain.handle('write-settings', async (_event, data: string) => {
 // Read the original markdown file for initial import
 ipcMain.handle('read-markdown-file', async (_event, filePath: string) => {
   try {
-    const resolvedPath = path.isAbsolute(filePath)
-      ? filePath
-      : path.join(app.getAppPath(), filePath)
-    if (fs.existsSync(resolvedPath)) {
-      return fs.readFileSync(resolvedPath, 'utf-8')
+    // Try multiple locations: absolute, app root, extraResources
+    const candidates = path.isAbsolute(filePath)
+      ? [filePath]
+      : [
+          path.join(app.getAppPath(), filePath),
+          path.join(process.resourcesPath, filePath),
+        ]
+    for (const p of candidates) {
+      if (fs.existsSync(p)) {
+        return fs.readFileSync(p, 'utf-8')
+      }
     }
     return null
   } catch {
@@ -180,4 +189,169 @@ ipcMain.handle('toggle-compact-mode', () => {
 
 ipcMain.handle('get-compact-mode', () => {
   return isCompactMode
+})
+
+// ===== Clipboard Watch =====
+
+function startClipboardWatch() {
+  if (clipboardWatchInterval) return
+  lastClipboardText = clipboard.readText() || ''
+  clipboardWatchEnabled = true
+
+  clipboardWatchInterval = setInterval(() => {
+    if (!clipboardWatchEnabled || !mainWindow) return
+    const current = clipboard.readText() || ''
+    if (current && current !== lastClipboardText && current.trim().length > 5) {
+      lastClipboardText = current
+      mainWindow.webContents.send('clipboard-new-text', current)
+    }
+  }, 800)  // poll every 800ms
+}
+
+function stopClipboardWatch() {
+  if (clipboardWatchInterval) {
+    clearInterval(clipboardWatchInterval)
+    clipboardWatchInterval = null
+  }
+  clipboardWatchEnabled = false
+}
+
+ipcMain.handle('clipboard-watch-start', () => {
+  startClipboardWatch()
+  return true
+})
+
+ipcMain.handle('clipboard-watch-stop', () => {
+  stopClipboardWatch()
+  return true
+})
+
+ipcMain.handle('clipboard-watch-status', () => {
+  return clipboardWatchEnabled
+})
+
+// ===== Global Shortcut =====
+
+ipcMain.handle('register-global-shortcut', (_event, accelerator: string) => {
+  try {
+    globalShortcut.unregisterAll()
+    globalShortcut.register(accelerator, () => {
+      if (!mainWindow) return
+      if (mainWindow.isMinimized()) mainWindow.restore()
+      if (!mainWindow.isVisible()) mainWindow.show()
+      mainWindow.focus()
+      // Also send current clipboard content
+      const text = clipboard.readText() || ''
+      if (text.trim().length > 5) {
+        mainWindow.webContents.send('clipboard-new-text', text)
+      }
+    })
+    return true
+  } catch {
+    return false
+  }
+})
+
+app.on('will-quit', () => {
+  globalShortcut.unregisterAll()
+  stopClipboardWatch()
+})
+
+// ===== LLM Proxy (bypass CORS) =====
+
+ipcMain.handle('llm-proxy', async (_event, options: {
+  url: string
+  headers: Record<string, string>
+  body: string
+  stream?: boolean
+}) => {
+  try {
+    const resp = await fetch(options.url, {
+      method: 'POST',
+      headers: options.headers,
+      body: options.body,
+    })
+
+    if (!resp.ok) {
+      const errorText = await resp.text()
+      return { ok: false, status: resp.status, error: errorText }
+    }
+
+    if (options.stream) {
+      // For streaming, read body and return as text (SSE events)
+      const text = await resp.text()
+      return { ok: true, status: resp.status, body: text, stream: true }
+    } else {
+      const json = await resp.json()
+      return { ok: true, status: resp.status, body: json }
+    }
+  } catch (err: any) {
+    return { ok: false, status: 0, error: err.message || String(err) }
+  }
+})
+
+// ===== Memory System =====
+
+function getMemoryDir(): string {
+  // In dev: project root / memory
+  // In production: extraResources / memory (with writable copy in userData)
+  if (VITE_DEV_SERVER_URL) {
+    return path.join(app.getAppPath(), 'memory')
+  }
+  // Production: use userData for writable memory
+  const userMemory = path.join(app.getPath('userData'), 'memory')
+  if (!fs.existsSync(userMemory)) {
+    // Copy initial memory files from resources on first run
+    const srcMemory = path.join(process.resourcesPath, 'memory')
+    if (fs.existsSync(srcMemory)) {
+      fs.cpSync(srcMemory, userMemory, { recursive: true })
+    } else {
+      fs.mkdirSync(userMemory, { recursive: true })
+    }
+  }
+  return userMemory
+}
+
+ipcMain.handle('read-memory-file', async (_event, relativePath: string) => {
+  try {
+    const filePath = path.join(getMemoryDir(), relativePath)
+    if (fs.existsSync(filePath)) {
+      return fs.readFileSync(filePath, 'utf-8')
+    }
+    return null
+  } catch {
+    return null
+  }
+})
+
+ipcMain.handle('write-memory-file', async (_event, relativePath: string, content: string) => {
+  // Block writes to CONSTITUTION.md
+  if (relativePath === 'CONSTITUTION.md') {
+    console.warn('[Memory] Blocked write attempt to CONSTITUTION.md')
+    return false
+  }
+  try {
+    const filePath = path.join(getMemoryDir(), relativePath)
+    const dir = path.dirname(filePath)
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true })
+    }
+    fs.writeFileSync(filePath, content, 'utf-8')
+    return true
+  } catch {
+    return false
+  }
+})
+
+ipcMain.handle('list-memory-daily', async () => {
+  try {
+    const dailyDir = path.join(getMemoryDir(), 'daily')
+    if (!fs.existsSync(dailyDir)) return []
+    return fs.readdirSync(dailyDir)
+      .filter(f => f.endsWith('.md'))
+      .sort()
+      .reverse()
+  } catch {
+    return []
+  }
 })

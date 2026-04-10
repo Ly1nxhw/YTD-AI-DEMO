@@ -1,7 +1,11 @@
 import { useState } from 'react'
-import { Send, Loader2, Copy, CheckCircle, AlertTriangle, Pencil, RotateCcw, Save } from 'lucide-react'
+import { Send, Loader2, Copy, CheckCircle, AlertTriangle, Pencil, RotateCcw, Save, Bot, User, ShieldCheck, ShieldAlert } from 'lucide-react'
 import { useGenerationStore } from '@/stores/generation-store'
 import { useKnowledgeStore } from '@/stores/knowledge-store'
+import { useSettingsStore } from '@/stores/settings-store'
+import { resolveGap } from '@/agent/gap-tracker'
+import { markLastSessionSavedScript } from '@/agent/stats-tracker'
+import { translateToTarget } from '@/lib/llm-adapter'
 import { SUPPORTED_LANGUAGES } from '@/types'
 import VariableFillPanel from './VariableFillPanel'
 
@@ -26,19 +30,27 @@ export default function MainPanel({ isCompact = false }: MainPanelProps) {
     generateReply,
     reset,
     confirmCopy,
+    triageInfo,
+    qualityCheck,
+    pipelineDecision,
+    suggestedStrategy,
   } = useGenerationStore()
 
   const addEntry = useKnowledgeStore(s => s.addEntry)
+  const settings = useSettingsStore(s => s.settings)
 
   const [isEditing, setIsEditing] = useState(false)
+  const [isEditingChinese, setIsEditingChinese] = useState(false)
+  const [retranslating, setRetranslating] = useState(false)
   const [copied, setCopied] = useState(false)
   const [editedChinese, setEditedChinese] = useState('')
   const [matchCopyFeedback, setMatchCopyFeedback] = useState<number | null>(null)
   const [showSaveForm, setShowSaveForm] = useState(false)
   const [saveTitle, setSaveTitle] = useState('')
   const [saveCategory, setSaveCategory] = useState('')
+  const [savedSuccess, setSavedSuccess] = useState(false)
 
-  const isProcessing = status === 'step1' || status === 'matching' || status === 'step2'
+  const isProcessing = status === 'triage' || status === 'matching' || status === 'step2'
 
   const detectedLang = step1Result?.detected_language
   const targetLangCode = selectedLanguage === 'auto' ? (detectedLang || 'en') : selectedLanguage
@@ -62,6 +74,20 @@ export default function MainPanel({ isCompact = false }: MainPanelProps) {
     setTimeout(() => setMatchCopyFeedback(null), 1500)
   }
 
+  const handleOpenSaveForm = () => {
+    // Auto-fill from AI analysis
+    if (step1Result?.intent) setSaveTitle(step1Result.intent)
+    if (step1Result?.intent) {
+      const intentLower = step1Result.intent.toLowerCase()
+      if (intentLower.includes('退款') || intentLower.includes('refund')) setSaveCategory('退款类')
+      else if (intentLower.includes('物流') || intentLower.includes('shipping') || intentLower.includes('delivery')) setSaveCategory('物流类')
+      else if (intentLower.includes('产品') || intentLower.includes('product') || intentLower.includes('quality')) setSaveCategory('产品问题类')
+      else if (intentLower.includes('配件') || intentLower.includes('accessory')) setSaveCategory('配件类')
+      else setSaveCategory('其他类')
+    }
+    setShowSaveForm(true)
+  }
+
   const handleSaveAsScript = async () => {
     if (!saveTitle || !step2Result) return
     await addEntry({
@@ -72,8 +98,12 @@ export default function MainPanel({ isCompact = false }: MainPanelProps) {
       scenario: saveCategory || '其他类',
     })
     setShowSaveForm(false)
+    resolveGap(step1Result?.intent || saveTitle)
+    markLastSessionSavedScript()
     setSaveTitle('')
     setSaveCategory('')
+    setSavedSuccess(true)
+    setTimeout(() => setSavedSuccess(false), 3000)
   }
 
   return (
@@ -124,7 +154,7 @@ export default function MainPanel({ isCompact = false }: MainPanelProps) {
                 )}
                 {isCompact
                   ? (isProcessing ? '...' : '生成')
-                  : (status === 'step1' ? '分析中...' : status === 'matching' ? '匹配中...' : status === 'step2' ? '生成中...' : '生成回复')
+                  : (status === 'triage' ? '分流中...' : status === 'matching' ? '匹配中...' : status === 'step2' ? '生成中...' : '生成回复')
                 }
               </button>
             </div>
@@ -138,6 +168,72 @@ export default function MainPanel({ isCompact = false }: MainPanelProps) {
         {error && (
           <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-600">
             {error}
+          </div>
+        )}
+
+        {/* Triage result card */}
+        {triageInfo && (
+          <div className={`rounded-lg border overflow-hidden ${
+            pipelineDecision === 'AUTO' ? 'border-green-200 bg-green-50' :
+            pipelineDecision === 'QUALITY_FAIL' ? 'border-amber-200 bg-amber-50' :
+            'border-yellow-200 bg-yellow-50'
+          }`}>
+            <div className={`flex items-center gap-2 px-3 py-2 ${
+              pipelineDecision === 'AUTO' ? 'bg-green-100' :
+              pipelineDecision === 'QUALITY_FAIL' ? 'bg-amber-100' :
+              'bg-yellow-100'
+            }`}>
+              {pipelineDecision === 'AUTO' ? (
+                <Bot className="w-4 h-4 text-green-700" />
+              ) : (
+                <User className="w-4 h-4 text-yellow-700" />
+              )}
+              <span className={`text-xs font-bold ${
+                pipelineDecision === 'AUTO' ? 'text-green-700' :
+                pipelineDecision === 'QUALITY_FAIL' ? 'text-amber-700' :
+                'text-yellow-700'
+              }`}>
+                {pipelineDecision === 'AUTO' ? '🤖 AUTO 自动回复' :
+                 pipelineDecision === 'QUALITY_FAIL' ? '⚠️ 质检未通过 → 人工' :
+                 '👤 HUMAN 需人工处理'}
+              </span>
+            </div>
+            <div className="px-3 py-2 space-y-1.5">
+              <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px]">
+                <span className="text-gray-600">
+                  复杂度: <strong>{triageInfo.complexity}/10</strong>
+                </span>
+                <span className="text-gray-600">
+                  情绪: <strong>{
+                    triageInfo.sentiment === 'positive' ? '😊 正面' :
+                    triageInfo.sentiment === 'negative' ? '😟 负面' :
+                    triageInfo.sentiment === 'angry' ? '😠 愤怒' : '😐 中性'
+                  }</strong>
+                </span>
+                <span className="text-gray-600">
+                  风险: <strong className={
+                    triageInfo.risk_level === 'high' ? 'text-red-600' :
+                    triageInfo.risk_level === 'medium' ? 'text-amber-600' : 'text-green-600'
+                  }>{
+                    triageInfo.risk_level === 'high' ? '高' :
+                    triageInfo.risk_level === 'medium' ? '中' : '低'
+                  }</strong>
+                </span>
+              </div>
+              <p className="text-[11px] text-gray-500">{triageInfo.reason}</p>
+              {step1Result?.chinese_translation && (
+                <div className="mt-1.5 p-2 bg-white/60 rounded border border-gray-200">
+                  <p className="text-[10px] font-medium text-gray-500 mb-0.5">📝 客户消息翻译</p>
+                  <p className="text-[11px] text-gray-700 leading-relaxed">{step1Result.chinese_translation}</p>
+                </div>
+              )}
+              {suggestedStrategy && pipelineDecision !== 'AUTO' && (
+                <div className="mt-1.5 p-2 bg-white/60 rounded border border-yellow-200">
+                  <p className="text-[11px] font-medium text-yellow-800">💡 建议策略</p>
+                  <p className="text-[11px] text-yellow-700 mt-0.5">{suggestedStrategy}</p>
+                </div>
+              )}
+            </div>
           </div>
         )}
 
@@ -174,9 +270,14 @@ export default function MainPanel({ isCompact = false }: MainPanelProps) {
               <AlertTriangle className="w-4 h-4" />
               话术库未覆盖此场景（AI 基于通用能力生成，请仔细核对）
             </div>
-            {!showSaveForm ? (
+            {savedSuccess ? (
+              <div className="mt-2 flex items-center gap-1 text-[11px] text-green-700">
+                <CheckCircle className="w-3 h-3" />
+                已保存到话术库
+              </div>
+            ) : !showSaveForm ? (
               <button
-                onClick={() => setShowSaveForm(true)}
+                onClick={handleOpenSaveForm}
                 className="mt-2 flex items-center gap-1 px-2.5 py-1 text-[11px] text-amber-700 bg-amber-100 rounded hover:bg-amber-200"
               >
                 <Save className="w-3 h-3" />
@@ -185,20 +286,27 @@ export default function MainPanel({ isCompact = false }: MainPanelProps) {
             ) : (
               <div className="mt-2 space-y-1.5">
                 <input
-                  placeholder="话术标题"
+                  placeholder="话术标题（已从意图自动填充）"
                   value={saveTitle}
                   onChange={e => setSaveTitle(e.target.value)}
-                  className="w-full px-2 py-1 text-xs border rounded"
+                  className="w-full px-2 py-1 text-xs border border-amber-300 rounded bg-white focus:outline-none focus:ring-1 focus:ring-amber-400"
                 />
                 <input
-                  placeholder="分类（默认：其他类）"
+                  placeholder="分类"
                   value={saveCategory}
                   onChange={e => setSaveCategory(e.target.value)}
-                  className="w-full px-2 py-1 text-xs border rounded"
+                  className="w-full px-2 py-1 text-xs border border-amber-300 rounded bg-white focus:outline-none focus:ring-1 focus:ring-amber-400"
                 />
+                {step1Result?.keywords && step1Result.keywords.length > 0 && (
+                  <div className="flex flex-wrap gap-1">
+                    {step1Result.keywords.map((kw, i) => (
+                      <span key={i} className="px-1.5 py-0.5 text-[10px] bg-amber-100 text-amber-700 rounded">#{kw}</span>
+                    ))}
+                  </div>
+                )}
                 <div className="flex gap-1">
-                  <button onClick={handleSaveAsScript} className="px-2 py-0.5 text-[10px] bg-amber-600 text-white rounded">保存</button>
-                  <button onClick={() => setShowSaveForm(false)} className="px-2 py-0.5 text-[10px] bg-gray-200 rounded">取消</button>
+                  <button onClick={handleSaveAsScript} className="px-2.5 py-1 text-[10px] bg-amber-600 text-white rounded hover:bg-amber-700">保存话术</button>
+                  <button onClick={() => setShowSaveForm(false)} className="px-2.5 py-1 text-[10px] bg-gray-200 text-gray-600 rounded hover:bg-gray-300">取消</button>
                 </div>
               </div>
             )}
@@ -274,18 +382,93 @@ export default function MainPanel({ isCompact = false }: MainPanelProps) {
                   </div>
                 </div>
 
-                {/* Right: Chinese translation */}
+                {/* Right: Chinese translation (editable) */}
                 <div>
-                  <div className="px-3 py-1.5 bg-gray-50 border-b border-gray-200">
+                  <div className="px-3 py-1.5 bg-gray-50 border-b border-gray-200 flex items-center justify-between">
                     <span className="text-[11px] font-medium text-gray-600">中文对照</span>
+                    {step2Result && (
+                      <button
+                        onClick={() => setIsEditingChinese(!isEditingChinese)}
+                        className="flex items-center gap-0.5 text-[10px] text-gray-400 hover:text-blue-600"
+                      >
+                        <Pencil className="w-2.5 h-2.5" />
+                        {isEditingChinese ? '完成' : '编辑'}
+                      </button>
+                    )}
                   </div>
                   <div className="p-3">
-                    <p className="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed">
-                      {editedChinese || step2Result?.chinese || ''}
-                      {status === 'step2' && !step2Result?.chinese && (
-                        <span className="text-gray-400 text-xs">生成中...</span>
-                      )}
-                    </p>
+                    {isEditingChinese ? (
+                      <>
+                        <textarea
+                          value={editedChinese || step2Result?.chinese || ''}
+                          onChange={e => setEditedChinese(e.target.value)}
+                          onKeyDown={async (e) => {
+                            if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+                              e.preventDefault()
+                              const chinese = editedChinese || step2Result?.chinese || ''
+                              if (!chinese.trim() || retranslating) return
+                              setRetranslating(true)
+                              try {
+                                const langName = langInfo?.name || targetLangCode
+                                const translated = await translateToTarget(
+                                  settings.llmProvider,
+                                  chinese,
+                                  langName,
+                                  settings.step2Model || undefined
+                                )
+                                setEditedReply(translated)
+                                setIsEditingChinese(false)
+                              } catch (err: any) {
+                                console.error('[Retranslate]', err)
+                              } finally {
+                                setRetranslating(false)
+                              }
+                            }
+                          }}
+                          className="w-full min-h-[120px] text-sm border border-gray-300 rounded p-2 resize-none focus:outline-none focus:ring-1 focus:ring-blue-400"
+                          placeholder="编辑中文后按 Ctrl+Enter 重新翻译"
+                        />
+                        <div className="mt-1.5 flex items-center justify-between">
+                          <span className="text-[10px] text-gray-400">
+                            {retranslating ? '✨ 翻译中...' : 'Ctrl+Enter 重新翻译外语'}
+                          </span>
+                          <button
+                            onClick={async () => {
+                              const chinese = editedChinese || step2Result?.chinese || ''
+                              if (!chinese.trim() || retranslating) return
+                              setRetranslating(true)
+                              try {
+                                const langName = langInfo?.name || targetLangCode
+                                const translated = await translateToTarget(
+                                  settings.llmProvider,
+                                  chinese,
+                                  langName,
+                                  settings.step2Model || undefined
+                                )
+                                setEditedReply(translated)
+                                setIsEditingChinese(false)
+                              } catch (err: any) {
+                                console.error('[Retranslate]', err)
+                              } finally {
+                                setRetranslating(false)
+                              }
+                            }}
+                            disabled={retranslating}
+                            className="px-2 py-0.5 text-[10px] bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 flex items-center gap-1"
+                          >
+                            {retranslating ? <Loader2 className="w-2.5 h-2.5 animate-spin" /> : <Send className="w-2.5 h-2.5" />}
+                            翻译
+                          </button>
+                        </div>
+                      </>
+                    ) : (
+                      <p className="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed">
+                        {editedChinese || step2Result?.chinese || ''}
+                        {status === 'step2' && !step2Result?.chinese && (
+                          <span className="text-gray-400 text-xs">生成中...</span>
+                        )}
+                      </p>
+                    )}
                   </div>
                 </div>
               </div>
@@ -301,6 +484,48 @@ export default function MainPanel({ isCompact = false }: MainPanelProps) {
                   onFill={(filledReply, filledChinese) => { setEditedReply(filledReply); setEditedChinese(filledChinese) }}
                   isCompact={isCompact}
                 />
+              </div>
+            )}
+
+            {/* Quality check result */}
+            {qualityCheck && (
+              <div className={`mt-2 p-2.5 rounded-lg border ${
+                qualityCheck.pass
+                  ? 'border-green-200 bg-green-50'
+                  : 'border-red-200 bg-red-50'
+              }`}>
+                <div className="flex items-center gap-1.5">
+                  {qualityCheck.pass ? (
+                    <ShieldCheck className="w-3.5 h-3.5 text-green-600" />
+                  ) : (
+                    <ShieldAlert className="w-3.5 h-3.5 text-red-600" />
+                  )}
+                  <span className={`text-[11px] font-medium ${
+                    qualityCheck.pass ? 'text-green-700' : 'text-red-700'
+                  }`}>
+                    {qualityCheck.pass ? '质检通过' : '质检未通过'}
+                  </span>
+                </div>
+                <div className="flex flex-wrap gap-x-2 gap-y-0.5 mt-1">
+                  {Object.entries(qualityCheck.checks).map(([key, pass]) => (
+                    <span key={key} className={`text-[10px] ${pass ? 'text-green-600' : 'text-red-600'}`}>
+                      {pass ? '✓' : '✗'}
+                      {key === 'language_match' ? '语言匹配' :
+                       key === 'no_sensitive_words' ? '无敏感词' :
+                       key === 'no_hallucination' ? '无幻觉' :
+                       key === 'variables_filled' ? '变量完整' :
+                       key === 'tone_appropriate' ? '语气得体' :
+                       key === 'not_empty' ? '内容完整' : key}
+                    </span>
+                  ))}
+                </div>
+                {qualityCheck.failReasons.length > 0 && (
+                  <div className="mt-1 space-y-0.5">
+                    {qualityCheck.failReasons.map((r, i) => (
+                      <p key={i} className="text-[10px] text-red-600">• {r}</p>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
 
@@ -342,7 +567,7 @@ export default function MainPanel({ isCompact = false }: MainPanelProps) {
             <div className="flex items-center gap-3 text-gray-500">
               <Loader2 className="w-5 h-5 animate-spin text-blue-500" />
               <span className="text-sm">
-                {status === 'step1' && '正在分析客户消息...'}
+                {status === 'triage' && '正在智能分流...'}
                 {status === 'matching' && '正在匹配话术库...'}
                 {status === 'step2' && '正在生成回复...'}
               </span>

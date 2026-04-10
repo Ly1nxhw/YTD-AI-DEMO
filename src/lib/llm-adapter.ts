@@ -1,4 +1,5 @@
 import type { LLMProvider, Step1Result, Step2Result, MatchedEntry, KnowledgeEntry } from '@/types'
+import { buildTriageContext } from '@/agent/context-builder'
 
 // ===== Default Prompts =====
 
@@ -83,6 +84,26 @@ interface StreamCallbacks {
   onError?: (error: string) => void
 }
 
+export interface TriageResult {
+  triage: {
+    decision: 'AUTO' | 'HUMAN'
+    complexity: number
+    sentiment: 'positive' | 'neutral' | 'negative' | 'angry'
+    risk_level: 'low' | 'medium' | 'high'
+    reason: string
+  }
+  chinese_translation: string
+  detected_language: string
+  intent: string
+  keywords: string[]
+  matched_ids: string[]
+  suggested_strategy?: string
+}
+
+const MAX_RETRIES = 2
+const RETRY_BASE_DELAY_MS = 1000
+const REQUEST_TIMEOUT_MS = 30000
+
 /**
  * Call OpenAI-compatible API (works with OpenAI, DeepSeek, Ollama, etc.)
  */
@@ -121,59 +142,136 @@ async function callOpenAICompatible(
     headers['Authorization'] = `Bearer ${provider.apiKey}`
   }
 
-  const response = await fetch(url, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify(body),
-  })
+  // Use Electron IPC proxy if available (bypasses CORS), fallback to direct fetch
+  const useProxy = typeof window !== 'undefined' && window.electronAPI?.llmProxy
 
-  if (!response.ok) {
-    const errorText = await response.text()
-    throw new Error(`LLM API error ${response.status}: ${errorText}`)
-  }
+  // Retry loop with exponential backoff
+  let lastError: Error | null = null
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    if (attempt > 0) {
+      const delay = RETRY_BASE_DELAY_MS * Math.pow(2, attempt - 1)
+      await new Promise(r => setTimeout(r, delay))
+      console.log(`[LLM] Retry attempt ${attempt}/${MAX_RETRIES}`)
+    }
 
-  if (stream && callbacks) {
-    // SSE streaming
-    const reader = response.body?.getReader()
-    if (!reader) throw new Error('No response body for streaming')
+    try {
+      if (useProxy) {
+        // ---- IPC proxy path (Node.js, no CORS) ----
+        const result = await window.electronAPI.llmProxy({
+          url,
+          headers,
+          body: JSON.stringify(body),
+          stream: stream ?? false,
+        })
 
-    const decoder = new TextDecoder()
-    let fullText = ''
+        if (!result.ok) {
+          lastError = new Error(`LLM API error ${result.status}: ${result.error}`)
+          if (result.status >= 500) continue
+          throw lastError
+        }
 
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
+        if (stream && callbacks && result.stream) {
+          // Parse SSE text returned from proxy
+          const sseText = result.body as string
+          const lines = sseText.split('\n').filter((l: string) => l.startsWith('data: '))
+          let fullText = ''
 
-      const chunk = decoder.decode(value, { stream: true })
-      const lines = chunk.split('\n').filter(line => line.startsWith('data: '))
+          for (const line of lines) {
+            const data = line.slice(6).trim()
+            if (data === '[DONE]') break
 
-      for (const line of lines) {
-        const data = line.slice(6).trim()
-        if (data === '[DONE]') {
+            try {
+              const parsed = JSON.parse(data)
+              const token = parsed.choices?.[0]?.delta?.content || ''
+              if (token) {
+                fullText += token
+                callbacks.onToken?.(token)
+              }
+            } catch {
+              // Skip malformed JSON lines
+            }
+          }
+
           callbacks.onComplete?.(fullText)
           return fullText
         }
 
-        try {
-          const parsed = JSON.parse(data)
-          const token = parsed.choices?.[0]?.delta?.content || ''
-          if (token) {
-            fullText += token
-            callbacks.onToken?.(token)
-          }
-        } catch {
-          // Skip malformed JSON lines
-        }
-      }
-    }
+        // Non-streaming proxy response
+        return result.body?.choices?.[0]?.message?.content || ''
 
-    callbacks.onComplete?.(fullText)
-    return fullText
+      } else {
+        // ---- Direct fetch path (for non-Electron or local Ollama) ----
+        const controller = new AbortController()
+        const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
+
+        const response = await fetch(url, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(body),
+          signal: controller.signal,
+        })
+        clearTimeout(timeout)
+
+        if (!response.ok) {
+          const errorText = await response.text()
+          lastError = new Error(`LLM API error ${response.status}: ${errorText}`)
+          if (response.status >= 500) continue
+          throw lastError
+        }
+
+        if (stream && callbacks) {
+          const reader = response.body?.getReader()
+          if (!reader) throw new Error('No response body for streaming')
+
+          const decoder = new TextDecoder()
+          let fullText = ''
+
+          while (true) {
+            const { done, value } = await reader.read()
+            if (done) break
+
+            const chunk = decoder.decode(value, { stream: true })
+            const lines = chunk.split('\n').filter(line => line.startsWith('data: '))
+
+            for (const line of lines) {
+              const data = line.slice(6).trim()
+              if (data === '[DONE]') {
+                callbacks.onComplete?.(fullText)
+                return fullText
+              }
+
+              try {
+                const parsed = JSON.parse(data)
+                const token = parsed.choices?.[0]?.delta?.content || ''
+                if (token) {
+                  fullText += token
+                  callbacks.onToken?.(token)
+                }
+              } catch {
+                // Skip malformed JSON lines
+              }
+            }
+          }
+
+          callbacks.onComplete?.(fullText)
+          return fullText
+        }
+
+        const data = await response.json()
+        return data.choices?.[0]?.message?.content || ''
+      }
+
+    } catch (err: any) {
+      if (err.name === 'AbortError') {
+        lastError = new Error(`LLM request timed out after ${REQUEST_TIMEOUT_MS}ms`)
+      } else if (!lastError || lastError.message !== err.message) {
+        lastError = err
+      }
+      if (attempt < MAX_RETRIES) continue
+    }
   }
 
-  // Non-streaming response
-  const data = await response.json()
-  return data.choices?.[0]?.message?.content || ''
+  throw lastError || new Error('LLM call failed after retries')
 }
 
 // ===== Script Catalog Builder =====
@@ -224,8 +322,11 @@ export async function runStep1(
     500           // Step 1 only outputs a small JSON, 500 tokens is plenty
   )
 
-  // Parse JSON from response (handle markdown code blocks)
-  const jsonStr = result.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
+  // Parse JSON from response (handle markdown code blocks and extra text)
+  let jsonStr = result.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
+  const fb = jsonStr.indexOf('{')
+  const lb = jsonStr.lastIndexOf('}')
+  if (fb !== -1 && lb > fb) jsonStr = jsonStr.slice(fb, lb + 1)
   try {
     const parsed = JSON.parse(jsonStr)
     // Ensure matched_ids is always an array
@@ -234,7 +335,7 @@ export async function runStep1(
     }
     return parsed
   } catch {
-    throw new Error(`Step 1 JSON parse failed: ${result}`)
+    throw new Error(`Step 1 JSON parse failed: ${jsonStr.slice(0, 300)}`)
   }
 }
 
@@ -292,18 +393,129 @@ export async function runStep2(
   }
 }
 
+// ===== Fallback =====
+
+/**
+ * Call LLM with a fallback provider if the primary fails.
+ */
+export async function callWithFallback(
+  primary: LLMProvider,
+  fallback: LLMProvider | null,
+  systemPrompt: string,
+  userMessage: string,
+  model?: string,
+  stream?: boolean,
+  callbacks?: StreamCallbacks,
+  maxTokensOverride?: number
+): Promise<string> {
+  try {
+    return await callOpenAICompatible(primary, systemPrompt, userMessage, model, stream, callbacks, maxTokensOverride)
+  } catch (err) {
+    if (fallback) {
+      console.warn(`[LLM] Primary failed, trying fallback:`, err)
+      return await callOpenAICompatible(fallback, systemPrompt, userMessage, fallback.model, stream, callbacks, maxTokensOverride)
+    }
+    throw err
+  }
+}
+
+// ===== Step 0: Triage (Smart Routing) =====
+
+export async function runTriageStep(
+  provider: LLMProvider,
+  customerMessage: string,
+  scriptCatalog: string,
+  fallbackProvider?: LLMProvider | null,
+  step1Model?: string
+): Promise<TriageResult> {
+  // Use context builder to assemble memory-aware prompt
+  const systemPrompt = await buildTriageContext({
+    keywords: [],  // will be populated after first pass; for now empty
+    scriptCatalog,
+    customerMessage,
+  })
+
+  const result = await callWithFallback(
+    provider,
+    fallbackProvider || null,
+    systemPrompt,
+    customerMessage,
+    step1Model,
+    false,
+    undefined,
+    800  // triage + match combined, slightly more than plain Step 1
+  )
+
+  console.log('[Triage] Raw LLM response:', result.slice(0, 500))
+
+  // Robust JSON extraction: strip fences, then find outermost { }
+  let jsonStr = result.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
+  const firstBrace = jsonStr.indexOf('{')
+  const lastBrace = jsonStr.lastIndexOf('}')
+  if (firstBrace !== -1 && lastBrace > firstBrace) {
+    jsonStr = jsonStr.slice(firstBrace, lastBrace + 1)
+  }
+
+  try {
+    const parsed = JSON.parse(jsonStr)
+    if (!Array.isArray(parsed.matched_ids)) parsed.matched_ids = []
+    if (!parsed.triage) {
+      parsed.triage = {
+        decision: 'HUMAN',
+        complexity: 5,
+        sentiment: 'neutral',
+        risk_level: 'medium',
+        reason: 'No triage data in response',
+      }
+    }
+    return parsed as TriageResult
+  } catch {
+    throw new Error(`Triage JSON parse failed: ${jsonStr.slice(0, 300)}`)
+  }
+}
+
 // ===== Test Connection =====
 
-export async function testConnection(provider: LLMProvider): Promise<boolean> {
+export async function testConnection(provider: LLMProvider): Promise<{ ok: boolean; error?: string }> {
   try {
     const result = await callOpenAICompatible(
       provider,
-      '你是一个测试助手',
-      '请回复"连接成功"',
-      provider.model
+      'You are a test assistant.',
+      'Reply with exactly: OK',
+      provider.model,
+      false,
+      undefined,
+      50
     )
-    return result.length > 0
-  } catch {
-    return false
+    return { ok: result.length > 0 }
+  } catch (err: any) {
+    console.error('[testConnection]', err)
+    return { ok: false, error: err.message || String(err) }
   }
+}
+
+// ===== Quick Translate (Chinese → Target Language) =====
+
+export async function translateToTarget(
+  provider: LLMProvider,
+  chineseText: string,
+  targetLanguage: string,
+  model?: string
+): Promise<string> {
+  const systemPrompt = `You are a professional e-commerce customer service translator. Translate the following Chinese customer service reply into ${targetLanguage}. 
+Rules:
+- Keep the same tone, style, and meaning.
+- Preserve any {{variables}} as-is.
+- Output ONLY the translated text, nothing else.`
+
+  const result = await callOpenAICompatible(
+    provider,
+    systemPrompt,
+    chineseText,
+    model,
+    false,
+    undefined,
+    1500
+  )
+  return result.trim()
 }
