@@ -44,6 +44,8 @@ interface ElectronAPI {
   readStatsRecords: () => Promise<any[]>
   appendStatsRecord: (record: unknown) => Promise<boolean>
   updateLastStatsRecord: (patch: unknown) => Promise<boolean>
+  readLearningSessions: () => Promise<import('@/types').LearningSession[]>
+  appendLearningSession: (session: import('@/types').LearningSession) => Promise<boolean>
 }
 
 declare global {

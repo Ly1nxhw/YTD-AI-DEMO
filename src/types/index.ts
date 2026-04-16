@@ -7,6 +7,13 @@ export interface KnowledgeEntry {
   keywords: string[]
   content: string
   scenario: string
+  sourceType?: KnowledgeSourceType
+  sourceRef?: string
+  qualityScore?: number
+  reviewStatus?: 'draft' | 'reviewed'
+  updatedByLearning?: boolean
+  usageCount?: number
+  lastUsedAt?: string
   deleted?: boolean
   createdAt?: string
   updatedAt?: string
@@ -61,6 +68,63 @@ export interface GeneratedKnowledgeScript {
   content: string
   scenario: string
   customerExample: string
+}
+
+export type KnowledgeSourceType =
+  | 'manual'
+  | 'conversation'
+  | 'initializer'
+  | 'imported'
+  | 'generated'
+
+export interface LearningRiskFlag {
+  level: 'info' | 'warning' | 'blocker'
+  code: string
+  message: string
+}
+
+export interface KnowledgeMergeSuggestion {
+  action: 'create' | 'update_existing' | 'ignore'
+  confidence: number
+  targetEntryId?: string
+  targetEntryTitle?: string
+  reasons: string[]
+}
+
+export interface LearnedScriptCandidate {
+  id: string
+  title: string
+  category: string
+  keywords: string[]
+  content: string
+  scenario: string
+  customerExample: string
+  normalizedTitle: string
+  qualityScore: number
+  flags: LearningRiskFlag[]
+  mergeSuggestion: KnowledgeMergeSuggestion
+  chosenAction: 'create' | 'update_existing' | 'ignore'
+}
+
+export interface LearningSession {
+  id: string
+  sourceType: 'conversation'
+  createdAt: string
+  sourcePreview: string
+  candidateCount: number
+  createdCount: number
+  updatedCount: number
+  ignoredCount: number
+  decisions: LearningSessionDecision[]
+}
+
+export interface LearningSessionDecision {
+  candidateId: string
+  title: string
+  action: 'create' | 'update_existing' | 'ignore'
+  qualityScore: number
+  targetEntryId?: string
+  targetEntryTitle?: string
 }
 
 // ===== LLM Types =====

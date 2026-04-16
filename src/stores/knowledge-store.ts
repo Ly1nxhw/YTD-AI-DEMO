@@ -2,6 +2,17 @@ import { create } from 'zustand'
 import type { KnowledgeBase, KnowledgeEntry } from '@/types'
 import { parseMarkdownToKnowledgeBase } from '@/lib/markdown-parser'
 
+function collectCategories(entries: KnowledgeEntry[]): string[] {
+  return Array.from(
+    new Set(
+      entries
+        .filter(entry => !entry.deleted)
+        .map(entry => entry.category.trim())
+        .filter(Boolean)
+    )
+  )
+}
+
 interface KnowledgeStore {
   knowledgeBase: KnowledgeBase | null
   loading: boolean
@@ -61,19 +72,20 @@ export const useKnowledgeStore = create<KnowledgeStore>((set, get) => ({
     const { knowledgeBase } = get()
     if (!knowledgeBase) return
 
+    const now = new Date().toISOString()
     const newEntry: KnowledgeEntry = {
       ...entryData,
       id: `entry-${Date.now()}`,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
+      createdAt: now,
+      updatedAt: now,
     }
+
+    const nextEntries = [...knowledgeBase.entries, newEntry]
 
     const updated: KnowledgeBase = {
       ...knowledgeBase,
-      entries: [...knowledgeBase.entries, newEntry],
-      categories: knowledgeBase.categories.includes(entryData.category)
-        ? knowledgeBase.categories
-        : [...knowledgeBase.categories, entryData.category],
+      entries: nextEntries,
+      categories: collectCategories(nextEntries),
     }
 
     await window.electronAPI.writeKnowledgeBase(JSON.stringify(updated, null, 2))
@@ -100,7 +112,7 @@ export const useKnowledgeStore = create<KnowledgeStore>((set, get) => ({
     const updated: KnowledgeBase = {
       ...knowledgeBase,
       entries: [...knowledgeBase.entries, ...newEntries],
-      categories: Array.from(categories),
+      categories: Array.from(categories).filter(Boolean),
     }
 
     await window.electronAPI.writeKnowledgeBase(JSON.stringify(updated, null, 2))
@@ -118,6 +130,8 @@ export const useKnowledgeStore = create<KnowledgeStore>((set, get) => ({
       ),
     }
 
+    updated.categories = collectCategories(updated.entries)
+
     await window.electronAPI.writeKnowledgeBase(JSON.stringify(updated, null, 2))
     set({ knowledgeBase: updated })
   },
@@ -132,6 +146,8 @@ export const useKnowledgeStore = create<KnowledgeStore>((set, get) => ({
         e.id === id ? { ...e, deleted: true, updatedAt: new Date().toISOString() } : e
       ),
     }
+
+    updated.categories = collectCategories(updated.entries)
 
     await window.electronAPI.writeKnowledgeBase(JSON.stringify(updated, null, 2))
     set({ knowledgeBase: updated })

@@ -57,6 +57,27 @@ type SessionRecord = {
   savedAsScript: boolean
 }
 
+type LearningSessionDecision = {
+  candidateId: string
+  title: string
+  action: 'create' | 'update_existing' | 'ignore'
+  qualityScore: number
+  targetEntryId?: string
+  targetEntryTitle?: string
+}
+
+type LearningSessionRecord = {
+  id: string
+  sourceType: 'conversation'
+  createdAt: string
+  sourcePreview: string
+  candidateCount: number
+  createdCount: number
+  updatedCount: number
+  ignoredCount: number
+  decisions: LearningSessionDecision[]
+}
+
 type BackupReason = 'manual' | 'settings' | 'knowledge-base' | 'memory'
 
 type BackupManifest = {
@@ -217,6 +238,7 @@ function getWorkspacePaths(workspacePath: string) {
     knowledgeBase: path.join(workspacePath, 'knowledge-base.json'),
     statsDir: path.join(workspacePath, 'stats'),
     statsSessions: path.join(workspacePath, 'stats', 'sessions.jsonl'),
+    learningSessions: path.join(workspacePath, 'stats', 'learning-sessions.jsonl'),
     memoryDir: path.join(workspacePath, 'memory'),
     memoryDailyDir: path.join(workspacePath, 'memory', 'daily'),
     backupsDir: path.join(workspacePath, 'backups'),
@@ -289,6 +311,9 @@ function ensureWorkspaceScaffold(workspacePath: string, name = DEFAULT_WORKSPACE
   }
   if (!fs.existsSync(paths.statsSessions)) {
     writeTextAtomic(paths.statsSessions, '')
+  }
+  if (!fs.existsSync(paths.learningSessions)) {
+    writeTextAtomic(paths.learningSessions, '')
   }
 }
 
@@ -880,6 +905,35 @@ function writeStatsRecordsToWorkspace(records: SessionRecord[]) {
   writeTextAtomic(getWorkspacePaths(requireCurrentWorkspacePath()).statsSessions, content ? `${content}\n` : '')
 }
 
+function readLearningSessionsFromWorkspace(): LearningSessionRecord[] {
+  const filePath = getWorkspacePaths(requireCurrentWorkspacePath()).learningSessions
+  if (!fs.existsSync(filePath)) return []
+
+  const lines = fs.readFileSync(filePath, 'utf-8')
+    .split(/\r?\n/)
+    .map(line => line.trim())
+    .filter(Boolean)
+
+  const records: LearningSessionRecord[] = []
+  for (const line of lines) {
+    try {
+      records.push(JSON.parse(line) as LearningSessionRecord)
+    } catch {
+      continue
+    }
+  }
+
+  return records.sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+}
+
+function writeLearningSessionsToWorkspace(records: LearningSessionRecord[]) {
+  const trimmed = records
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+    .slice(0, 200)
+  const content = trimmed.map(record => JSON.stringify(record)).join('\n')
+  writeTextAtomic(getWorkspacePaths(requireCurrentWorkspacePath()).learningSessions, content ? `${content}\n` : '')
+}
+
 app.whenReady().then(() => {
   Menu.setApplicationMenu(null)
   createWindow()
@@ -1159,6 +1213,26 @@ ipcMain.handle('append-stats-record', async (_event, record: SessionRecord) => {
     const records = readStatsRecordsFromWorkspace()
     records.push(record)
     writeStatsRecordsToWorkspace(records)
+    updateWorkspaceFingerprint(requireCurrentWorkspacePath())
+    return true
+  } catch {
+    return false
+  }
+})
+
+ipcMain.handle('read-learning-sessions', async () => {
+  try {
+    return readLearningSessionsFromWorkspace()
+  } catch {
+    return []
+  }
+})
+
+ipcMain.handle('append-learning-session', async (_event, session: LearningSessionRecord) => {
+  try {
+    const records = readLearningSessionsFromWorkspace()
+    records.unshift(session)
+    writeLearningSessionsToWorkspace(records)
     updateWorkspaceFingerprint(requireCurrentWorkspacePath())
     return true
   } catch {

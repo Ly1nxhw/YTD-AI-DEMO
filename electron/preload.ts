@@ -47,4 +47,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   readStatsRecords: () => ipcRenderer.invoke('read-stats-records'),
   appendStatsRecord: (record: unknown) => ipcRenderer.invoke('append-stats-record', record),
   updateLastStatsRecord: (patch: unknown) => ipcRenderer.invoke('update-last-stats-record', patch),
+  readLearningSessions: () => ipcRenderer.invoke('read-learning-sessions'),
+  appendLearningSession: (session: unknown) => ipcRenderer.invoke('append-learning-session', session),
 })
