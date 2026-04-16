@@ -15,6 +15,9 @@ out/
 # 系统文件
 .DS_Store
 *.log
+Thumbs.db
+*.tmp
+*.tsbuildinfo
 
 # 编辑器
 .idea/
@@ -34,3 +37,10 @@ AI-客服/
 node_modules/
 dist/
 out/
+
+# 本地业务素材 / 临时文档
+/客服素材.docx
+/客服回复.md
+/*.zip
+/*.7z
+/*.rar
