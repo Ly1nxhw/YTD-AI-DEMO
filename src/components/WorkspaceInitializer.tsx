@@ -39,7 +39,7 @@ const SCENARIO_SUGGESTIONS = [
 export default function WorkspaceInitializer({ onClose }: WorkspaceInitializerProps) {
   const settings = useSettingsStore(s => s.settings)
   const addEntries = useKnowledgeStore(s => s.addEntries)
-  const activeEntries = useKnowledgeStore(s => s.getActiveEntries())
+  const knowledgeBase = useKnowledgeStore(s => s.knowledgeBase)
 
   const [profile, setProfile] = useState<WorkspaceInitProfile>(DEFAULT_PROFILE)
   const [generating, setGenerating] = useState(false)
@@ -51,7 +51,7 @@ export default function WorkspaceInitializer({ onClose }: WorkspaceInitializerPr
 
   const hasProvider = !!settings.llmProvider.apiUrl && !!settings.llmProvider.model
   const canGenerate = hasProvider && !!profile.productDomain.trim() && !!profile.productSummary.trim()
-  const existingCount = activeEntries.length
+  const existingCount = knowledgeBase?.entries.filter(entry => !entry.deleted).length ?? 0
 
   const selectedCount = selected.size
   const helperText = useMemo(() => {
