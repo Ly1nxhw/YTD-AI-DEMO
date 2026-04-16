@@ -13,6 +13,7 @@ interface KnowledgeStore {
   loadKnowledgeBase: () => Promise<void>
   importFromMarkdown: (markdown: string) => Promise<void>
   addEntry: (entry: Omit<KnowledgeEntry, 'id' | 'createdAt' | 'updatedAt'>) => Promise<void>
+  addEntries: (entries: Array<Omit<KnowledgeEntry, 'id' | 'createdAt' | 'updatedAt'>>) => Promise<void>
   updateEntry: (id: string, updates: Partial<KnowledgeEntry>) => Promise<void>
   deleteEntry: (id: string) => Promise<void>
   getFilteredEntries: () => KnowledgeEntry[]
@@ -73,6 +74,33 @@ export const useKnowledgeStore = create<KnowledgeStore>((set, get) => ({
       categories: knowledgeBase.categories.includes(entryData.category)
         ? knowledgeBase.categories
         : [...knowledgeBase.categories, entryData.category],
+    }
+
+    await window.electronAPI.writeKnowledgeBase(JSON.stringify(updated, null, 2))
+    set({ knowledgeBase: updated })
+  },
+
+  addEntries: async (entriesData) => {
+    const { knowledgeBase } = get()
+    if (!knowledgeBase || entriesData.length === 0) return
+
+    const now = new Date().toISOString()
+    const newEntries: KnowledgeEntry[] = entriesData.map((entryData, index) => ({
+      ...entryData,
+      id: `entry-${Date.now()}-${index}`,
+      createdAt: now,
+      updatedAt: now,
+    }))
+
+    const categories = new Set(knowledgeBase.categories)
+    for (const entry of newEntries) {
+      categories.add(entry.category)
+    }
+
+    const updated: KnowledgeBase = {
+      ...knowledgeBase,
+      entries: [...knowledgeBase.entries, ...newEntries],
+      categories: Array.from(categories),
     }
 
     await window.electronAPI.writeKnowledgeBase(JSON.stringify(updated, null, 2))

@@ -1,4 +1,12 @@
-import type { LLMProvider, Step1Result, Step2Result, MatchedEntry, KnowledgeEntry } from '@/types'
+import type {
+  LLMProvider,
+  Step1Result,
+  Step2Result,
+  MatchedEntry,
+  KnowledgeEntry,
+  WorkspaceInitProfile,
+  GeneratedKnowledgeScript,
+} from '@/types'
 import { buildTriageContext } from '@/agent/context-builder'
 
 // ===== Default Prompts =====
@@ -503,6 +511,88 @@ export interface ExtractedScript {
   content: string       // 话术模板（中文）
   scenario: string      // 场景描述
   customerExample: string  // 原始客户消息示例
+}
+
+export async function generateInitialScripts(
+  provider: LLMProvider,
+  profile: WorkspaceInitProfile,
+  model?: string
+): Promise<GeneratedKnowledgeScript[]> {
+  const systemPrompt = `你是一位资深跨境电商客服知识库架构师。你的任务是为一个新的 AI 客服工作区初始化第一版可用话术库。
+
+你需要根据品牌、产品领域、销售渠道、地区、履约方式和售后策略，生成一组“首批高频场景话术”。
+
+输出严格 JSON 数组，每个元素：
+{
+  "title": "话术标题",
+  "category": "分类（如：问候类、物流类、退款类、产品问题类、售后类、配件类、安装使用类、其他类）",
+  "keywords": ["关键词1", "关键词2", "关键词3"],
+  "content": "中文话术正文，要求专业、可直接用于客服回复，必要信息用 {{变量}} 占位符",
+  "scenario": "适用场景描述",
+  "customerExample": "客户常见提问示例"
+}
+
+生成规则：
+- 只输出 JSON 数组，不要输出解释文字
+- 先覆盖高频客服场景，不追求过多条目
+- 默认生成 12 到 18 条
+- 话术内容必须结合提供的产品领域和品牌背景，不能空泛
+- 必须显式遵守“禁止承诺项”
+- 如果涉及退款、换新、补发、退货，优先遵守提供的售后策略
+- 话术正文要适合后续被翻译为多语言客服回复
+- 所有话术正文统一用中文输出
+- 订单号、金额、日期、链接、产品型号等用变量表示，如 {{订单号}} {{金额}} {{日期}} {{产品型号}} {{链接}}
+- 关键词要便于后续意图匹配
+- customerExample 用一句代表性客户表达即可
+
+优先覆盖但不限于以下场景：
+- 问候和收件确认
+- 物流查询 / 延迟送达 / 包裹丢失
+- 产品损坏 / 缺件 / 无法使用
+- 使用指导 / 安装说明 / 兼容性问题
+- 配件咨询
+- 退款挽留 / 退货流程 / 换新建议
+- 联系平台支持或进一步排查`
+
+  const userPrompt = `请基于以下工作区初始化资料，生成第一版客服话术库：
+
+品牌名称：${profile.brandName || '未提供'}
+产品领域：${profile.productDomain || '未提供'}
+产品概述：${profile.productSummary || '未提供'}
+销售渠道：${profile.salesChannel || '未提供'}
+目标市场：${profile.targetMarkets.join('、') || '未提供'}
+服务语言：${profile.languages.join('、') || '未提供'}
+履约方式：${profile.fulfillmentMode || '未提供'}
+售后策略：${profile.supportPolicies || '未提供'}
+禁止承诺项：${profile.forbiddenCommitments || '未提供'}
+客服语气：${profile.toneStyle || '未提供'}
+额外重点场景：${profile.seedScenarios.join('、') || '未提供'}`
+
+  const result = await callOpenAICompatible(
+    provider,
+    systemPrompt,
+    userPrompt,
+    model,
+    false,
+    undefined,
+    5000
+  )
+
+  let jsonStr = result.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
+  const firstBracket = jsonStr.indexOf('[')
+  const lastBracket = jsonStr.lastIndexOf(']')
+  if (firstBracket !== -1 && lastBracket > firstBracket) {
+    jsonStr = jsonStr.slice(firstBracket, lastBracket + 1)
+  }
+
+  try {
+    const parsed = JSON.parse(jsonStr)
+    if (!Array.isArray(parsed)) return []
+    return parsed as GeneratedKnowledgeScript[]
+  } catch {
+    console.error('[generateInitialScripts] JSON parse failed:', jsonStr.slice(0, 400))
+    return []
+  }
 }
 
 export async function extractScriptsFromChat(

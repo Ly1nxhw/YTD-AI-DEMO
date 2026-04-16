@@ -11,11 +11,13 @@ import StatusBar from '@/components/StatusBar'
 import TitleBar from '@/components/TitleBar'
 import StatsPanel from '@/components/StatsPanel'
 import ConversationLearner from '@/components/ConversationLearner'
+import WorkspaceInitializer from '@/components/WorkspaceInitializer'
 
 export default function App() {
   const [showSettings, setShowSettings] = useState(false)
   const [showStats, setShowStats] = useState(false)
   const [showLearner, setShowLearner] = useState(false)
+  const [showInitializer, setShowInitializer] = useState(false)
   const [isCompact, setIsCompact] = useState(false)
   const [externalChanges, setExternalChanges] = useState<string[]>([])
   const loadKnowledgeBase = useKnowledgeStore(s => s.loadKnowledgeBase)
@@ -209,20 +211,31 @@ export default function App() {
           <div className="flex flex-1 overflow-hidden">
             {!isCompact && (
               <Sidebar
-                onOpenKB={() => { setShowStats(false); setShowSettings(false); setShowLearner(false) }}
-                onOpenStats={() => { setShowStats(true); setShowSettings(false); setShowLearner(false) }}
-                onOpenLearner={() => { setShowLearner(true); setShowSettings(false); setShowStats(false) }}
-                activePanel={showStats ? 'stats' : showLearner ? 'learner' : undefined}
+                onOpenKB={() => { setShowStats(false); setShowSettings(false); setShowLearner(false); setShowInitializer(false) }}
+                onOpenStats={() => { setShowStats(true); setShowSettings(false); setShowLearner(false); setShowInitializer(false) }}
+                onOpenLearner={() => { setShowLearner(true); setShowSettings(false); setShowStats(false); setShowInitializer(false) }}
+                onOpenInitializer={() => { setShowInitializer(true); setShowSettings(false); setShowStats(false); setShowLearner(false) }}
+                activePanel={showInitializer ? 'initializer' : showStats ? 'stats' : showLearner ? 'learner' : undefined}
               />
             )}
             {showSettings && !isCompact ? (
               <SettingsPanel onClose={() => setShowSettings(false)} />
+            ) : showInitializer && !isCompact ? (
+              <WorkspaceInitializer onClose={() => setShowInitializer(false)} />
             ) : showStats && !isCompact ? (
               <StatsPanel onClose={() => setShowStats(false)} />
             ) : showLearner && !isCompact ? (
               <ConversationLearner onClose={() => setShowLearner(false)} />
             ) : (
-              <MainPanel isCompact={isCompact} />
+              <MainPanel
+                isCompact={isCompact}
+                onOpenInitializer={() => {
+                  setShowInitializer(true)
+                  setShowSettings(false)
+                  setShowStats(false)
+                  setShowLearner(false)
+                }}
+              />
             )}
           </div>
 

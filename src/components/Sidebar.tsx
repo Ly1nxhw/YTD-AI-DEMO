@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Search, Plus, ChevronRight, ChevronDown, Copy, Pencil, Trash2, X, BookOpen, BarChart3 } from 'lucide-react'
+import { Search, Plus, ChevronRight, ChevronDown, Copy, Pencil, Trash2, X, BookOpen, BarChart3, Wand2 } from 'lucide-react'
 import { useKnowledgeStore } from '@/stores/knowledge-store'
 import type { KnowledgeEntry } from '@/types'
 
@@ -7,10 +7,11 @@ interface SidebarProps {
   onOpenKB: () => void
   onOpenStats: () => void
   onOpenLearner: () => void
+  onOpenInitializer: () => void
   activePanel?: string
 }
 
-export default function Sidebar({ onOpenKB, onOpenStats, onOpenLearner, activePanel }: SidebarProps) {
+export default function Sidebar({ onOpenKB, onOpenStats, onOpenLearner, onOpenInitializer, activePanel }: SidebarProps) {
   const {
     knowledgeBase,
     searchQuery,
@@ -293,6 +294,17 @@ export default function Sidebar({ onOpenKB, onOpenStats, onOpenLearner, activePa
 
       {/* Other nav buttons — after KB list */}
       <div className="px-2 pb-2 space-y-0.5" style={isKBActive ? {} : { marginTop: '0.125rem' }}>
+        <button
+          onClick={onOpenInitializer}
+          className={`w-full flex items-center gap-2 px-3 py-2 text-xs rounded-lg transition-colors ${
+            activePanel === 'initializer'
+              ? 'bg-indigo-50 text-indigo-700 font-semibold'
+              : 'text-gray-600 hover:bg-gray-50'
+          }`}
+        >
+          <Wand2 className="w-4 h-4" />
+          初始化工作区
+        </button>
         <button
           onClick={onOpenLearner}
           className={`w-full flex items-center gap-2 px-3 py-2 text-xs rounded-lg transition-colors ${

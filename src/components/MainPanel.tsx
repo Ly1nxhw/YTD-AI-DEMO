@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Send, Loader2, Copy, CheckCircle, AlertTriangle, Pencil, RotateCcw, Save, Bot, User, ShieldCheck, ShieldAlert } from 'lucide-react'
+import { Send, Loader2, Copy, CheckCircle, AlertTriangle, Pencil, RotateCcw, Save, Bot, User, ShieldCheck, ShieldAlert, Wand2 } from 'lucide-react'
 import { useGenerationStore } from '@/stores/generation-store'
 import { useKnowledgeStore } from '@/stores/knowledge-store'
 import { useSettingsStore } from '@/stores/settings-store'
@@ -11,9 +11,10 @@ import VariableFillPanel from './VariableFillPanel'
 
 interface MainPanelProps {
   isCompact?: boolean
+  onOpenInitializer?: () => void
 }
 
-export default function MainPanel({ isCompact = false }: MainPanelProps) {
+export default function MainPanel({ isCompact = false, onOpenInitializer }: MainPanelProps) {
   const {
     customerMessage,
     setCustomerMessage,
@@ -37,6 +38,7 @@ export default function MainPanel({ isCompact = false }: MainPanelProps) {
   } = useGenerationStore()
 
   const addEntry = useKnowledgeStore(s => s.addEntry)
+  const knowledgeBase = useKnowledgeStore(s => s.knowledgeBase)
   const settings = useSettingsStore(s => s.settings)
 
   const [isEditing, setIsEditing] = useState(false)
@@ -51,6 +53,8 @@ export default function MainPanel({ isCompact = false }: MainPanelProps) {
   const [savedSuccess, setSavedSuccess] = useState(false)
 
   const isProcessing = status === 'triage' || status === 'matching' || status === 'step2'
+  const activeEntryCount = knowledgeBase?.entries.filter(entry => !entry.deleted).length ?? 0
+  const showInitializerPrompt = activeEntryCount === 0 && !step2Result && !streamingReply && !isProcessing
 
   const detectedLang = step1Result?.detected_language
   const targetLangCode = selectedLanguage === 'auto' ? (detectedLang || 'en') : selectedLanguage
@@ -168,6 +172,30 @@ export default function MainPanel({ isCompact = false }: MainPanelProps) {
         {error && (
           <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-600">
             {error}
+          </div>
+        )}
+
+        {showInitializerPrompt && !isCompact && (
+          <div className="p-4 rounded-xl border border-indigo-200 bg-indigo-50">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="flex items-center gap-2 text-sm font-semibold text-indigo-800">
+                  <Wand2 className="w-4 h-4" />
+                  当前工作区还是空的
+                </div>
+                <p className="mt-1 text-xs leading-5 text-indigo-700">
+                  如果你还没有整理好的话术库，可以先运行“工作区初始化”，基于产品领域和售后策略生成第一版客服话术草稿。
+                </p>
+              </div>
+              {onOpenInitializer && (
+                <button
+                  onClick={onOpenInitializer}
+                  className="shrink-0 rounded-md bg-indigo-600 px-3 py-1.5 text-xs text-white hover:bg-indigo-700"
+                >
+                  去初始化
+                </button>
+              )}
+            </div>
           </div>
         )}
 

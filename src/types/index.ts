@@ -40,6 +40,29 @@ export interface WorkspaceChangeStatus {
   checkedAt: string
 }
 
+export interface WorkspaceInitProfile {
+  brandName: string
+  productDomain: string
+  productSummary: string
+  salesChannel: string
+  targetMarkets: string[]
+  languages: string[]
+  fulfillmentMode: string
+  supportPolicies: string
+  forbiddenCommitments: string
+  toneStyle: string
+  seedScenarios: string[]
+}
+
+export interface GeneratedKnowledgeScript {
+  title: string
+  category: string
+  keywords: string[]
+  content: string
+  scenario: string
+  customerExample: string
+}
+
 // ===== LLM Types =====
 
 export interface LLMProvider {
