@@ -1,7 +1,7 @@
 import type { KnowledgeBase, KnowledgeEntry } from '@/types'
 
 /**
- * Parse the 客服回复.md file into a structured KnowledgeBase
+ * Parse imported markdown text into a structured KnowledgeBase
  */
 export function parseMarkdownToKnowledgeBase(markdown: string): KnowledgeBase {
   const entries: KnowledgeEntry[] = []

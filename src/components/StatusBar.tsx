@@ -2,11 +2,13 @@ import { useState, useEffect } from 'react'
 import { ClipboardPaste, AlertCircle } from 'lucide-react'
 import { useSettingsStore } from '@/stores/settings-store'
 import { useKnowledgeStore } from '@/stores/knowledge-store'
+import { useWorkspaceStore } from '@/stores/workspace-store'
 import { getGapSummary } from '@/agent/gap-tracker'
 
 export default function StatusBar() {
   const settings = useSettingsStore(s => s.settings)
   const knowledgeBase = useKnowledgeStore(s => s.knowledgeBase)
+  const workspace = useWorkspaceStore(s => s.workspace)
   const [clipboardWatch, setClipboardWatch] = useState(false)
   const [gapSummary, setGapSummary] = useState<{ intent: string; count: number }[]>([])
   const [showGaps, setShowGaps] = useState(false)
@@ -38,6 +40,7 @@ export default function StatusBar() {
   return (
     <div className="flex items-center justify-between px-4 py-1.5 bg-gray-100 border-t border-gray-200 text-[11px] text-gray-500">
       <div className="flex items-center gap-4">
+        <span>工作区: {workspace?.name || '未加载'}</span>
         <span>
           {hasApiKey ? '✅' : '⚠️'} {providerName}
         </span>

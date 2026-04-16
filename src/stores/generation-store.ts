@@ -135,7 +135,7 @@ export const useGenerationStore = create<GenerationStore>((set, get) => ({
       }
 
       // Record session stats
-      recordSession({
+      await recordSession({
         intent: s1?.intent || 'unknown',
         language: s1?.detected_language || '??',
         decision: get().triageInfo?.decision === 'AUTO' ? 'AUTO' : 'HUMAN',
@@ -175,7 +175,7 @@ export const useGenerationStore = create<GenerationStore>((set, get) => ({
       await window.electronAPI.copyToClipboard(textToCopy)
       // Track if user edited the reply
       if (editedReply && step2Result?.reply && editedReply !== step2Result.reply) {
-        markLastSessionEdited()
+        await markLastSessionEdited()
       }
       set({ isDraft: false })
     }

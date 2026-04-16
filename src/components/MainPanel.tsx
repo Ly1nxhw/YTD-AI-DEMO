@@ -99,7 +99,7 @@ export default function MainPanel({ isCompact = false }: MainPanelProps) {
     })
     setShowSaveForm(false)
     resolveGap(step1Result?.intent || saveTitle)
-    markLastSessionSavedScript()
+    await markLastSessionSavedScript()
     setSaveTitle('')
     setSaveCategory('')
     setSavedSuccess(true)

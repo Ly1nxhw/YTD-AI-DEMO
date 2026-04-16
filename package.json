@@ -54,14 +54,7 @@
     },
     "files": [
       "dist/**/*",
-      "dist-electron/**/*",
-      "客服回复.md"
-    ],
-    "extraResources": [
-      {
-        "from": "客服回复.md",
-        "to": "客服回复.md"
-      }
+      "dist-electron/**/*"
     ]
   }
 }

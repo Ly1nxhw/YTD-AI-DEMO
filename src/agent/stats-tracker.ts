@@ -1,7 +1,5 @@
 /**
- * Stats Tracker — 个人使用统计
- *
- * 记录每次生成的关键信息，按天聚合统计
+ * Stats Tracker — 工作区级别使用统计
  */
 
 export interface SessionRecord {
@@ -9,9 +7,9 @@ export interface SessionRecord {
   intent: string
   language: string
   decision: 'AUTO' | 'HUMAN'
-  matched: boolean        // had matching scripts
-  edited: boolean         // user edited the reply
-  savedAsScript: boolean  // user saved a new script
+  matched: boolean
+  edited: boolean
+  savedAsScript: boolean
 }
 
 export interface DailyStats {
@@ -27,88 +25,72 @@ export interface DailyStats {
   topLanguages: { lang: string; count: number }[]
 }
 
-const STORAGE_KEY = 'stats-tracker-records'
+const LEGACY_STORAGE_KEY = 'stats-tracker-records'
 
-function loadRecords(): SessionRecord[] {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY)
-    return raw ? JSON.parse(raw) : []
-  } catch {
-    return []
-  }
-}
-
-function saveRecords(records: SessionRecord[]) {
-  // Keep last 90 days of records
-  const cutoff = new Date()
-  cutoff.setDate(cutoff.getDate() - 90)
-  const cutoffStr = cutoff.toISOString()
-  const filtered = records.filter(r => r.timestamp >= cutoffStr)
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(filtered))
-}
-
-/**
- * Record a completed generation session
- */
-export function recordSession(record: Omit<SessionRecord, 'timestamp'>) {
-  const records = loadRecords()
-  records.push({
-    ...record,
-    timestamp: new Date().toISOString(),
-  })
-  saveRecords(records)
-}
-
-/**
- * Mark the last session as edited
- */
-export function markLastSessionEdited() {
-  const records = loadRecords()
-  if (records.length > 0) {
-    records[records.length - 1].edited = true
-    saveRecords(records)
-  }
-}
-
-/**
- * Mark the last session as saved-as-script
- */
-export function markLastSessionSavedScript() {
-  const records = loadRecords()
-  if (records.length > 0) {
-    records[records.length - 1].savedAsScript = true
-    saveRecords(records)
-  }
-}
+let migrated = false
 
 function todayStr(): string {
   return new Date().toISOString().slice(0, 10)
 }
 
-/**
- * Get stats for a specific date (default: today)
- */
-export function getDailyStats(date?: string): DailyStats {
-  const d = date || todayStr()
-  const records = loadRecords().filter(r => r.timestamp.startsWith(d))
+async function migrateLegacyLocalStats() {
+  if (migrated) return
+  migrated = true
 
+  try {
+    const raw = localStorage.getItem(LEGACY_STORAGE_KEY)
+    if (!raw) return
+
+    const records = JSON.parse(raw) as SessionRecord[]
+    if (!Array.isArray(records) || records.length === 0) {
+      localStorage.removeItem(LEGACY_STORAGE_KEY)
+      return
+    }
+
+    const existing = await window.electronAPI.readStatsRecords()
+    const seen = new Set(existing.map((record: SessionRecord) => JSON.stringify(record)))
+
+    for (const record of records) {
+      const key = JSON.stringify(record)
+      if (!seen.has(key)) {
+        await window.electronAPI.appendStatsRecord(record)
+      }
+    }
+
+    localStorage.removeItem(LEGACY_STORAGE_KEY)
+  } catch {
+    // Ignore migration failures; new writes still go to workspace stats.
+  }
+}
+
+async function loadRecords(): Promise<SessionRecord[]> {
+  await migrateLegacyLocalStats()
+  try {
+    return await window.electronAPI.readStatsRecords() as SessionRecord[]
+  } catch {
+    return []
+  }
+}
+
+function buildDailyStats(records: SessionRecord[], date: string): DailyStats {
+  const dailyRecords = records.filter(record => record.timestamp.startsWith(date))
   const intentMap = new Map<string, number>()
   const langMap = new Map<string, number>()
 
-  for (const r of records) {
-    intentMap.set(r.intent, (intentMap.get(r.intent) || 0) + 1)
-    langMap.set(r.language, (langMap.get(r.language) || 0) + 1)
+  for (const record of dailyRecords) {
+    intentMap.set(record.intent, (intentMap.get(record.intent) || 0) + 1)
+    langMap.set(record.language, (langMap.get(record.language) || 0) + 1)
   }
 
   return {
-    date: d,
-    total: records.length,
-    autoCount: records.filter(r => r.decision === 'AUTO').length,
-    humanCount: records.filter(r => r.decision === 'HUMAN').length,
-    matchedCount: records.filter(r => r.matched).length,
-    unmatchedCount: records.filter(r => !r.matched).length,
-    editedCount: records.filter(r => r.edited).length,
-    newScriptsCount: records.filter(r => r.savedAsScript).length,
+    date,
+    total: dailyRecords.length,
+    autoCount: dailyRecords.filter(record => record.decision === 'AUTO').length,
+    humanCount: dailyRecords.filter(record => record.decision === 'HUMAN').length,
+    matchedCount: dailyRecords.filter(record => record.matched).length,
+    unmatchedCount: dailyRecords.filter(record => !record.matched).length,
+    editedCount: dailyRecords.filter(record => record.edited).length,
+    newScriptsCount: dailyRecords.filter(record => record.savedAsScript).length,
     topIntents: Array.from(intentMap.entries())
       .map(([intent, count]) => ({ intent, count }))
       .sort((a, b) => b.count - a.count)
@@ -119,17 +101,43 @@ export function getDailyStats(date?: string): DailyStats {
   }
 }
 
-/**
- * Get stats for last N days
- */
-export function getWeekStats(): DailyStats[] {
+export async function recordSession(record: Omit<SessionRecord, 'timestamp'>) {
+  await migrateLegacyLocalStats()
+  await window.electronAPI.appendStatsRecord({
+    ...record,
+    timestamp: new Date().toISOString(),
+  })
+}
+
+export async function markLastSessionEdited() {
+  await migrateLegacyLocalStats()
+  await window.electronAPI.updateLastStatsRecord({ edited: true })
+}
+
+export async function markLastSessionSavedScript() {
+  await migrateLegacyLocalStats()
+  await window.electronAPI.updateLastStatsRecord({ savedAsScript: true })
+}
+
+export async function getDailyStats(date?: string): Promise<DailyStats> {
+  const targetDate = date || todayStr()
+  const records = await loadRecords()
+  return buildDailyStats(records, targetDate)
+}
+
+export async function getWeekStats(): Promise<DailyStats[]> {
+  const records = await loadRecords()
   const stats: DailyStats[] = []
-  for (let i = 0; i < 7; i++) {
-    const d = new Date()
-    d.setDate(d.getDate() - i)
-    const dateStr = d.toISOString().slice(0, 10)
-    const s = getDailyStats(dateStr)
-    if (s.total > 0) stats.push(s)
+
+  for (let index = 0; index < 7; index += 1) {
+    const date = new Date()
+    date.setDate(date.getDate() - index)
+    const dateStr = date.toISOString().slice(0, 10)
+    const dailyStats = buildDailyStats(records, dateStr)
+    if (dailyStats.total > 0) {
+      stats.push(dailyStats)
+    }
   }
+
   return stats
 }

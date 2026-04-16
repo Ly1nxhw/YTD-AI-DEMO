@@ -1,7 +1,10 @@
-import { useState } from 'react'
-import { X, CheckCircle, Loader2, RotateCcw, Plus, Trash2 } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { X, CheckCircle, Loader2, RotateCcw, Plus, Trash2, FolderOpen, Download, Upload, Pencil } from 'lucide-react'
 import { useSettingsStore } from '@/stores/settings-store'
+import { useKnowledgeStore } from '@/stores/knowledge-store'
+import { useWorkspaceStore } from '@/stores/workspace-store'
 import { testConnection } from '@/lib/llm-adapter'
+import type { BackupInfo, WorkspaceChangeStatus } from '@/types'
 
 interface SettingsPanelProps {
   onClose: () => void
@@ -9,11 +12,29 @@ interface SettingsPanelProps {
 
 export default function SettingsPanel({ onClose }: SettingsPanelProps) {
   const { settings, updateSettings, updateProvider, switchProvider, addProvider, removeProvider, resetPrompts } = useSettingsStore()
+  const loadSettings = useSettingsStore(s => s.loadSettings)
+  const loadKnowledgeBase = useKnowledgeStore(s => s.loadKnowledgeBase)
+  const {
+    workspace,
+    recent,
+    createWorkspace,
+    switchWorkspace,
+    openWorkspaceDirectory,
+    renameWorkspace,
+    importWorkspaceZip,
+    loading: workspaceLoading,
+  } = useWorkspaceStore()
   const [testing, setTesting] = useState(false)
   const [testResult, setTestResult] = useState<{ ok: boolean; error?: string } | null>(null)
-  const [activeTab, setActiveTab] = useState<'llm' | 'prompts'>('llm')
+  const [activeTab, setActiveTab] = useState<'workspace' | 'llm' | 'prompts'>('workspace')
   const [showAddForm, setShowAddForm] = useState(false)
   const [newProviderName, setNewProviderName] = useState('')
+  const [newWorkspaceName, setNewWorkspaceName] = useState('')
+  const [renameWorkspaceName, setRenameWorkspaceName] = useState('')
+  const [backups, setBackups] = useState<BackupInfo[]>([])
+  const [changeStatus, setChangeStatus] = useState<WorkspaceChangeStatus | null>(null)
+  const [maintenanceLoading, setMaintenanceLoading] = useState(false)
+  const [maintenanceMessage, setMaintenanceMessage] = useState<string | null>(null)
 
   const handleTestConnection = async () => {
     setTesting(true)
@@ -27,6 +48,139 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
     setTesting(false)
   }
 
+  const refreshWorkspaceContext = async () => {
+    await Promise.all([
+      loadSettings(),
+      loadKnowledgeBase(),
+    ])
+    await window.electronAPI.acknowledgeWorkspaceState()
+  }
+
+  const refreshWorkspaceMaintenance = async () => {
+    if (!workspace) return
+    const [backupList, status] = await Promise.all([
+      window.electronAPI.listWorkspaceBackups(),
+      window.electronAPI.checkWorkspaceExternalChanges(),
+    ])
+    setBackups(backupList)
+    setChangeStatus(status)
+  }
+
+  const handleCreateWorkspace = async () => {
+    const name = newWorkspaceName.trim()
+    if (!name) return
+    const ok = await createWorkspace({ name, chooseLocation: true })
+    if (!ok) return
+    await refreshWorkspaceContext()
+    setNewWorkspaceName('')
+  }
+
+  const handleSwitchWorkspace = async (workspacePath: string) => {
+    if (workspace?.path === workspacePath) return
+    await switchWorkspace(workspacePath)
+    await refreshWorkspaceContext()
+  }
+
+  const handleOpenWorkspaceDirectory = async () => {
+    const ok = await openWorkspaceDirectory()
+    if (!ok) return
+    await refreshWorkspaceContext()
+    await refreshWorkspaceMaintenance()
+    setMaintenanceMessage('已打开工作区目录')
+  }
+
+  const handleRenameWorkspace = async () => {
+    const targetName = renameWorkspaceName.trim()
+    if (!targetName) return
+    const ok = await renameWorkspace(targetName)
+    if (!ok) {
+      setMaintenanceMessage('工作区重命名失败')
+      return
+    }
+    await refreshWorkspaceContext()
+    await refreshWorkspaceMaintenance()
+    setRenameWorkspaceName('')
+    setMaintenanceMessage('工作区已重命名')
+  }
+
+  const handleExportWorkspace = async () => {
+    setMaintenanceLoading(true)
+    try {
+      const exported = await window.electronAPI.exportWorkspaceZip()
+      setMaintenanceMessage(exported ? `已导出到 ${exported}` : '已取消导出')
+    } finally {
+      setMaintenanceLoading(false)
+    }
+  }
+
+  const handleImportWorkspace = async () => {
+    const ok = await importWorkspaceZip()
+    if (!ok) return
+    await refreshWorkspaceContext()
+    await refreshWorkspaceMaintenance()
+    setMaintenanceMessage('工作区 ZIP 已导入')
+  }
+
+  const handleManualBackup = async () => {
+    setMaintenanceLoading(true)
+    try {
+      await window.electronAPI.createWorkspaceBackup('manual')
+      await refreshWorkspaceMaintenance()
+      setMaintenanceMessage('已创建手动备份')
+    } finally {
+      setMaintenanceLoading(false)
+    }
+  }
+
+  const handleRestoreBackup = async (backupId: string) => {
+    const confirmed = window.confirm('恢复备份会覆盖当前工作区文件，继续吗？')
+    if (!confirmed) return
+
+    setMaintenanceLoading(true)
+    try {
+      const ok = await window.electronAPI.restoreWorkspaceBackup(backupId)
+      if (ok) {
+        await refreshWorkspaceContext()
+        await refreshWorkspaceMaintenance()
+        setMaintenanceMessage('备份已恢复')
+      } else {
+        setMaintenanceMessage('恢复备份失败')
+      }
+    } finally {
+      setMaintenanceLoading(false)
+    }
+  }
+
+  const handleCheckExternalChanges = async () => {
+    setMaintenanceLoading(true)
+    try {
+      const status = await window.electronAPI.checkWorkspaceExternalChanges()
+      setChangeStatus(status)
+      setMaintenanceMessage(status.hasExternalChanges ? '检测到工作区文件外部修改' : '未发现外部修改')
+    } finally {
+      setMaintenanceLoading(false)
+    }
+  }
+
+  const handleReloadWorkspace = async () => {
+    setMaintenanceLoading(true)
+    try {
+      await refreshWorkspaceContext()
+      await refreshWorkspaceMaintenance()
+      setMaintenanceMessage('工作区已重新加载')
+    } finally {
+      setMaintenanceLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    void refreshWorkspaceMaintenance()
+  }, [workspace?.path])
+
+  useEffect(() => {
+    setRenameWorkspaceName(workspace?.name ?? '')
+  }, [workspace?.name])
+
   return (
     <div className="flex-1 flex flex-col bg-white overflow-hidden">
       {/* Header */}
@@ -39,6 +193,16 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
 
       {/* Tabs */}
       <div className="flex border-b border-gray-200">
+        <button
+          onClick={() => setActiveTab('workspace')}
+          className={`px-4 py-2 text-xs font-medium border-b-2 transition-colors ${
+            activeTab === 'workspace'
+              ? 'border-blue-600 text-blue-600'
+              : 'border-transparent text-gray-500 hover:text-gray-700'
+          }`}
+        >
+          工作区
+        </button>
         <button
           onClick={() => setActiveTab('llm')}
           className={`px-4 py-2 text-xs font-medium border-b-2 transition-colors ${
@@ -63,6 +227,191 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto p-4">
+        {workspace && (
+          <div className="mb-4 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
+            <div className="text-[11px] font-medium text-gray-600">当前工作区</div>
+            <div className="mt-1 text-xs text-gray-800">{workspace.name}</div>
+            <div className="mt-0.5 break-all text-[10px] text-gray-500">{workspace.path}</div>
+            <div className="mt-3 flex gap-2">
+              <input
+                value={newWorkspaceName}
+                onChange={e => setNewWorkspaceName(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === 'Enter') {
+                    void handleCreateWorkspace()
+                  }
+                }}
+                placeholder="新工作区名称"
+                className="flex-1 rounded-md border border-gray-200 px-2.5 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-blue-400"
+              />
+              <button
+                onClick={() => void handleCreateWorkspace()}
+                disabled={workspaceLoading || !newWorkspaceName.trim()}
+                className="rounded-md bg-blue-600 px-3 py-1.5 text-xs text-white hover:bg-blue-700 disabled:opacity-50"
+              >
+                新建
+              </button>
+              <button
+                onClick={() => void handleOpenWorkspaceDirectory()}
+                disabled={workspaceLoading}
+                className="rounded-md border border-gray-200 px-3 py-1.5 text-xs text-gray-600 hover:border-blue-300 hover:text-blue-600 disabled:opacity-50"
+                title="打开已有工作区目录"
+              >
+                <FolderOpen className="inline h-3.5 w-3.5" />
+              </button>
+            </div>
+            <div className="mt-2 flex gap-2">
+              <input
+                value={renameWorkspaceName}
+                onChange={e => setRenameWorkspaceName(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === 'Enter') {
+                    void handleRenameWorkspace()
+                  }
+                }}
+                placeholder="重命名当前工作区"
+                className="flex-1 rounded-md border border-gray-200 px-2.5 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-blue-400"
+              />
+              <button
+                onClick={() => void handleRenameWorkspace()}
+                disabled={workspaceLoading || !renameWorkspaceName.trim()}
+                className="rounded-md border border-gray-200 px-3 py-1.5 text-xs text-gray-600 hover:border-blue-300 hover:text-blue-600 disabled:opacity-50"
+              >
+                <Pencil className="inline h-3.5 w-3.5" />
+              </button>
+            </div>
+            {recent.length > 0 && (
+              <div className="mt-3">
+                <div className="text-[11px] font-medium text-gray-600">最近工作区</div>
+                <div className="mt-1.5 flex flex-wrap gap-1.5">
+                  {recent.map(item => (
+                    <button
+                      key={item.path}
+                      onClick={() => void handleSwitchWorkspace(item.path)}
+                      disabled={workspaceLoading}
+                      className={`rounded-full border px-2.5 py-1 text-[11px] transition-colors ${
+                        item.path === workspace.path
+                          ? 'border-blue-600 bg-blue-600 text-white'
+                          : 'border-gray-200 bg-white text-gray-600 hover:border-blue-300 hover:text-blue-600'
+                      }`}
+                    >
+                      {item.name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+        {activeTab === 'workspace' && workspace && (
+          <div className="max-w-2xl space-y-4">
+            <div className="rounded-lg border border-gray-200 bg-white p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="text-xs font-medium text-gray-700">工作区维护</div>
+                  <div className="mt-1 text-[11px] text-gray-500">检查外部改动，或在关键节点前创建快照。</div>
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => void handleImportWorkspace()}
+                    disabled={workspaceLoading}
+                    className="rounded-md border border-gray-200 px-3 py-1.5 text-xs text-gray-600 hover:border-blue-300 hover:text-blue-600 disabled:opacity-50"
+                  >
+                    <Upload className="mr-1 inline h-3.5 w-3.5" />
+                    导入 ZIP
+                  </button>
+                  <button
+                    onClick={() => void handleExportWorkspace()}
+                    disabled={maintenanceLoading}
+                    className="rounded-md border border-gray-200 px-3 py-1.5 text-xs text-gray-600 hover:border-blue-300 hover:text-blue-600 disabled:opacity-50"
+                  >
+                    <Download className="mr-1 inline h-3.5 w-3.5" />
+                    导出 ZIP
+                  </button>
+                  <button
+                    onClick={() => void handleCheckExternalChanges()}
+                    disabled={maintenanceLoading}
+                    className="rounded-md border border-gray-200 px-3 py-1.5 text-xs text-gray-600 hover:border-blue-300 hover:text-blue-600 disabled:opacity-50"
+                  >
+                    检查变更
+                  </button>
+                  <button
+                    onClick={() => void handleManualBackup()}
+                    disabled={maintenanceLoading}
+                    className="rounded-md bg-blue-600 px-3 py-1.5 text-xs text-white hover:bg-blue-700 disabled:opacity-50"
+                  >
+                    立即备份
+                  </button>
+                </div>
+              </div>
+
+              <div className="mt-3 rounded-md border border-gray-100 bg-gray-50 p-3">
+                <div className="text-[11px] font-medium text-gray-600">外部修改状态</div>
+                <div className={`mt-1 text-xs ${changeStatus?.hasExternalChanges ? 'text-amber-600' : 'text-green-600'}`}>
+                  {changeStatus?.hasExternalChanges ? '检测到外部修改' : '当前无外部修改'}
+                </div>
+                {changeStatus?.changedFiles && changeStatus.changedFiles.length > 0 && (
+                  <div className="mt-2">
+                    <div className="text-[11px] text-gray-500">变更文件</div>
+                    <div className="mt-1 flex flex-wrap gap-1.5">
+                      {changeStatus.changedFiles.slice(0, 8).map(file => (
+                        <span key={file} className="rounded-full bg-amber-50 px-2 py-0.5 text-[10px] text-amber-700">
+                          {file}
+                        </span>
+                      ))}
+                    </div>
+                    <button
+                      onClick={() => void handleReloadWorkspace()}
+                      disabled={maintenanceLoading}
+                      className="mt-3 rounded-md bg-amber-600 px-3 py-1.5 text-xs text-white hover:bg-amber-700 disabled:opacity-50"
+                    >
+                      重新加载工作区
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {maintenanceMessage && (
+                <div className="mt-3 text-xs text-gray-500">{maintenanceMessage}</div>
+              )}
+            </div>
+
+            <div className="rounded-lg border border-gray-200 bg-white p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="text-xs font-medium text-gray-700">最近备份</div>
+                  <div className="mt-1 text-[11px] text-gray-500">自动备份会在修改设置、知识库和 memory 时触发，最多保留 20 份。</div>
+                </div>
+                <span className="text-[11px] text-gray-400">{backups.length} 份</span>
+              </div>
+
+              <div className="mt-3 space-y-2">
+                {backups.length === 0 && (
+                  <div className="text-xs text-gray-400">还没有备份</div>
+                )}
+                {backups.map(backup => (
+                  <div key={backup.id} className="flex items-center justify-between rounded-md border border-gray-100 bg-gray-50 px-3 py-2">
+                    <div className="min-w-0">
+                      <div className="text-xs text-gray-700">{new Date(backup.createdAt).toLocaleString()}</div>
+                      <div className="mt-0.5 text-[11px] text-gray-500">
+                        {backup.reason === 'manual' ? '手动备份' :
+                         backup.reason === 'settings' ? '设置变更' :
+                         backup.reason === 'knowledge-base' ? '知识库变更' : 'Memory 变更'}
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => void handleRestoreBackup(backup.id)}
+                      disabled={maintenanceLoading}
+                      className="rounded-md border border-gray-200 px-2.5 py-1 text-[11px] text-gray-600 hover:border-blue-300 hover:text-blue-600 disabled:opacity-50"
+                    >
+                      恢复
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
         {activeTab === 'llm' && (
           <div className="space-y-4 max-w-lg">
             {/* Provider selector pills */}
@@ -147,7 +496,7 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
                 <input
                   value={settings.llmProvider.apiUrl}
                   onChange={e => updateProvider({ apiUrl: e.target.value })}
-                  placeholder="https://integrate.api.nvidia.com/v1"
+                  placeholder="输入服务接口地址"
                   className="w-full px-2.5 py-1.5 text-xs border border-gray-200 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-400"
                 />
               </div>
@@ -158,7 +507,7 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
                   type="password"
                   value={settings.llmProvider.apiKey}
                   onChange={e => updateProvider({ apiKey: e.target.value })}
-                  placeholder="nvapi-... / sk-..."
+                  placeholder="输入访问密钥"
                   className="w-full px-2.5 py-1.5 text-xs border border-gray-200 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-400"
                 />
               </div>
@@ -168,7 +517,7 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
                 <input
                   value={settings.llmProvider.model}
                   onChange={e => updateProvider({ model: e.target.value })}
-                  placeholder="meta/llama-3.3-70b-instruct"
+                  placeholder="输入模型标识"
                   className="w-full px-2.5 py-1.5 text-xs border border-gray-200 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-400"
                 />
               </div>

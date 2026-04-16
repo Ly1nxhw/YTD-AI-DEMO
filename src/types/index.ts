@@ -18,6 +18,28 @@ export interface KnowledgeBase {
   categories: string[]
 }
 
+export interface WorkspaceInfo {
+  name: string
+  path: string
+  description: string
+  defaultLanguage: string
+  createdAt: string
+  lastOpenedAt: string
+}
+
+export interface BackupInfo {
+  id: string
+  createdAt: string
+  reason: 'manual' | 'settings' | 'knowledge-base' | 'memory'
+  path: string
+}
+
+export interface WorkspaceChangeStatus {
+  hasExternalChanges: boolean
+  changedFiles: string[]
+  checkedAt: string
+}
+
 // ===== LLM Types =====
 
 export interface LLMProvider {

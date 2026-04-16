@@ -2,54 +2,21 @@ import { create } from 'zustand'
 import type { AppSettings, LLMProvider } from '@/types'
 import { DEFAULT_PROMPT_A, DEFAULT_PROMPT_B } from '@/lib/llm-adapter'
 
-// Preset providers — users fill in API keys
-const PRESET_PROVIDERS: LLMProvider[] = [
-  {
-    id: 'nvidia',
-    name: 'NVIDIA',
-    type: 'openai-compatible',
-    apiUrl: 'https://integrate.api.nvidia.com/v1',
-    apiKey: '',
-    model: 'meta/llama-3.3-70b-instruct',
-    maxTokens: 2000,
-    temperature: 0.3,
-  },
-  {
-    id: 'qwen',
-    name: 'Qwen (DashScope)',
-    type: 'openai-compatible',
-    apiUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
-    apiKey: '',
-    model: 'qwen3.5-flash',
-    maxTokens: 2000,
-    temperature: 0.3,
-  },
-  {
-    id: 'deepseek',
-    name: 'DeepSeek',
-    type: 'openai-compatible',
-    apiUrl: 'https://api.deepseek.com/v1',
-    apiKey: '',
-    model: 'deepseek-chat',
-    maxTokens: 2000,
-    temperature: 0.3,
-  },
-  {
-    id: 'openai',
-    name: 'OpenAI',
-    type: 'openai-compatible',
-    apiUrl: 'https://api.openai.com/v1',
-    apiKey: '',
-    model: 'gpt-4o-mini',
-    maxTokens: 2000,
-    temperature: 0.3,
-  },
-]
+const createBlankProvider = (): LLMProvider => ({
+  id: 'custom-default',
+  name: '自定义 Provider',
+  type: 'openai-compatible',
+  apiUrl: '',
+  apiKey: '',
+  model: '',
+  maxTokens: 2000,
+  temperature: 0.3,
+})
 
 const DEFAULT_SETTINGS: AppSettings = {
-  llmProvider: PRESET_PROVIDERS[0],
-  llmProviders: PRESET_PROVIDERS,
-  activeProviderId: 'nvidia',
+  llmProvider: createBlankProvider(),
+  llmProviders: [createBlankProvider()],
+  activeProviderId: 'custom-default',
   step1Model: '',
   step2Model: '',
   defaultLanguage: 'auto',
@@ -94,20 +61,18 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
 
         // Migration: old format had no llmProviders array
         if (!merged.llmProviders || merged.llmProviders.length === 0) {
-          merged.llmProviders = PRESET_PROVIDERS.map(p => {
-            // Preserve saved API key if provider id matches the old llmProvider
-            if (merged.llmProvider && merged.llmProvider.id === p.id) {
-              return { ...p, apiKey: merged.llmProvider.apiKey }
-            }
-            return p
-          })
-          merged.activeProviderId = merged.llmProvider?.id || 'nvidia'
+          const provider = merged.llmProvider ?? createBlankProvider()
+          merged.llmProviders = [provider]
+          merged.activeProviderId = provider.id || 'custom-default'
           needsSave = true
         }
 
         // Sync llmProvider to match activeProviderId
-        const active = merged.llmProviders.find((p: LLMProvider) => p.id === merged.activeProviderId)
-        if (active) merged.llmProvider = active
+        const active = merged.llmProviders.find((p: LLMProvider) => p.id === merged.activeProviderId) ?? merged.llmProviders[0]
+        if (active) {
+          merged.llmProvider = active
+          merged.activeProviderId = active.id
+        }
 
         set({ settings: merged })
         if (needsSave) {

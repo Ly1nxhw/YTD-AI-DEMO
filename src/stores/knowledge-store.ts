@@ -31,36 +31,17 @@ export const useKnowledgeStore = create<KnowledgeStore>((set, get) => ({
   loadKnowledgeBase: async () => {
     set({ loading: true })
     try {
-      // Always re-parse from markdown to ensure keywords are up-to-date
-      const markdown = await window.electronAPI.readMarkdownFile('客服回复.md')
-      if (markdown) {
-        const freshKb = parseMarkdownToKnowledgeBase(markdown)
-
-        // Merge with existing data to preserve user-added entries
-        const existingData = await window.electronAPI.readKnowledgeBase()
-        if (existingData) {
-          const existingIds = new Set(freshKb.entries.map(e => e.id))
-          const userEntries = existingData.entries.filter(
-            (e: KnowledgeEntry) => !existingIds.has(e.id) && e.id.startsWith('entry-') && parseInt(e.id.split('-')[1]) > Date.now() - 365 * 86400000
-          )
-          if (userEntries.length > 0) {
-            freshKb.entries.push(...userEntries)
-            for (const ue of userEntries) {
-              if (!freshKb.categories.includes(ue.category)) {
-                freshKb.categories.push(ue.category)
-              }
-            }
-          }
-        }
-
-        await window.electronAPI.writeKnowledgeBase(JSON.stringify(freshKb, null, 2))
-        set({ knowledgeBase: freshKb })
+      const data = await window.electronAPI.readKnowledgeBase()
+      if (data) {
+        set({ knowledgeBase: data })
       } else {
-        // Fallback: try loading cached JSON
-        const data = await window.electronAPI.readKnowledgeBase()
-        if (data) {
-          set({ knowledgeBase: data })
-        }
+        set({
+          knowledgeBase: {
+            version: '1.0.0',
+            entries: [],
+            categories: [],
+          },
+        })
       }
     } catch (error) {
       console.error('Failed to load knowledge base:', error)

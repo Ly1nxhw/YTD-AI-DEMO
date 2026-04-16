@@ -11,8 +11,22 @@ export default function StatsPanel({ onClose }: StatsPanelProps) {
   const [week, setWeek] = useState<DailyStats[]>([])
 
   useEffect(() => {
-    setToday(getDailyStats())
-    setWeek(getWeekStats())
+    let mounted = true
+
+    ;(async () => {
+      const [todayStats, weekStats] = await Promise.all([
+        getDailyStats(),
+        getWeekStats(),
+      ])
+
+      if (!mounted) return
+      setToday(todayStats)
+      setWeek(weekStats)
+    })()
+
+    return () => {
+      mounted = false
+    }
   }, [])
 
   const weekTotal = week.reduce((s, d) => s + d.total, 0)
