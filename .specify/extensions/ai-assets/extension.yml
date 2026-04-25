@@ -1,0 +1,36 @@
+schema_version: "1.0"
+
+extension:
+  id: ai-assets
+  name: "AI Assets Extractor"
+  version: "1.0.0"
+  description: "Extracts repository understanding into ai-assets/ and injects those assets into planning."
+  author: spec-kit-core
+  repository: https://github.com/github/spec-kit
+  license: MIT
+
+requires:
+  speckit_version: ">=0.2.0.dev0"
+  tools:
+    - name: python
+      required: false
+
+provides:
+  commands:
+    - name: speckit.ai-assets.extract
+      aliases:
+        - speckit.assets.extract
+      file: commands/speckit.ai-assets.extract.md
+      description: "Initialize or refresh ai-assets/ from repository facts."
+
+hooks:
+  before_plan:
+    command: speckit.ai-assets.extract
+    optional: false
+    description: "Refresh ai-assets before implementation planning."
+
+tags:
+  - "ai-assets"
+  - "documentation"
+  - "planning"
+  - "core"

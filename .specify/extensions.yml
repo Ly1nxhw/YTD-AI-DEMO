@@ -1,0 +1,12 @@
+installed: []
+settings:
+  auto_execute_hooks: true
+hooks:
+  before_plan:
+  - extension: ai-assets
+    command: speckit.ai-assets.extract
+    enabled: true
+    optional: false
+    prompt: Execute speckit.ai-assets.extract?
+    description: Refresh ai-assets before implementation planning.
+    condition: null

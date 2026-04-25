@@ -1,0 +1,75 @@
+schema_version: "1.0"
+workflow:
+  id: "speckit"
+  name: "完整 SDD 工作流"
+  version: "1.1.0"
+  author: "GitHub"
+  description: "以中文引导运行 constitution -> specify -> plan -> tasks -> implement，并在关键节点设置人工审阅门禁"
+
+requires:
+  speckit_version: ">=0.7.2"
+  integrations:
+    any: ["copilot", "claude", "gemini"]
+
+inputs:
+  spec:
+    type: string
+    required: true
+    prompt: "请描述你要构建的内容"
+  integration:
+    type: string
+    default: "copilot"
+    prompt: "请选择要使用的集成（如 claude、copilot、gemini）"
+  scope:
+    type: string
+    default: "full"
+    enum: ["full", "backend-only", "frontend-only"]
+
+steps:
+  - id: constitution
+    command: speckit.constitution
+    integration: "{{ inputs.integration }}"
+    input:
+      args: "{{ inputs.spec }}"
+
+  - id: review-constitution
+    type: gate
+    message: "请先审阅更新后的项目宪章，再继续生成功能规格。"
+    options: [approve, reject]
+    on_reject: abort
+
+  - id: specify
+    command: speckit.specify
+    integration: "{{ inputs.integration }}"
+    input:
+      args: "{{ inputs.spec }}"
+
+  - id: review-spec
+    type: gate
+    message: "请先审阅生成的规格说明，再继续技术规划。"
+    options: [approve, reject]
+    on_reject: abort
+
+  - id: plan
+    command: speckit.plan
+    integration: "{{ inputs.integration }}"
+    input:
+      args: "{{ inputs.spec }}"
+
+  - id: review-plan
+    type: gate
+    message: "请先审阅实现计划，再继续拆解任务。"
+    options: [approve, reject]
+    on_reject: abort
+
+  - id: tasks
+    command: speckit.tasks
+    integration: "{{ inputs.integration }}"
+    input:
+      args: "{{ inputs.spec }}"
+
+  - id: implement
+    command: speckit.implement
+    integration: "{{ inputs.integration }}"
+    input:
+      args: "{{ inputs.spec }}"

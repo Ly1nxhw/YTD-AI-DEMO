@@ -1,0 +1,24 @@
+{
+  "schema_version": "1.0",
+  "extensions": {
+    "ai-assets": {
+      "version": "1.0.0",
+      "source": "local",
+      "manifest_hash": "sha256:d0c793c8e766d26d4b0adf2e559c1f21169efd344da9ff7b776fd54c78222cc7",
+      "enabled": true,
+      "priority": 10,
+      "registered_commands": {
+        "agy": [
+          "speckit.ai-assets.extract",
+          "speckit.assets.extract"
+        ],
+        "codex": [
+          "speckit.ai-assets.extract",
+          "speckit.assets.extract"
+        ]
+      },
+      "registered_skills": [],
+      "installed_at": "2026-04-22T12:41:44.131372+00:00"
+    }
+  }
+}
